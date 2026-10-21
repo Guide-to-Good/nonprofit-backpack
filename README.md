@@ -2,7 +2,16 @@
 
 A **Nonprofit Backpack** is a small, portable bundle of facts about a nonprofit: who it is, where it is registered, its headline numbers, a short description, and hashes of the documents that back those up. It is an [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundle, markdown files with YAML frontmatter, and it records where every value came from and who confirmed it.
 
-This repo is the piping to make one: a Python library and a command, `nbp`. Facts go in; a validated zip comes out. It is a deliberately minimal digital public good, MIT-licensed, for others to fork and build on. It is not a web app.
+This repo is the piping to make one: a Python library and a command, `nbp`. Facts go in; a validated zip comes out. This repo is envisioned as a minimal, MIT-licensed digital public good. 
+
+The repo includes the following tooling:
+- CLI-format creation pathway
+- YAML import pathway for another system to provide a yaml file with organization information to create a backpack
+- Python API for developers to integrate into their own systems
+- Backpack validator to check a backpack for formatting consistency
+- A simple example implementation of UI to create a backpack
+
+The nbp creation command generates a UUID for the user to keep as a unique key to prove their identity as owner of the backpack. The backpack bundle has been created to allow hashes of files to be kept as pointers for those files if they are to be stored in another system; the bundle itself is not constructed to retain files. 
 
 ## Install
 
@@ -13,7 +22,7 @@ pip install -e . && playwright install chromium
 export OPENROUTER_API_KEY=sk-or-...      # optional: enables drafting of summary, mission, vision
 ```
 
-## Who uses it, and how
+## User types and use cases
 
 | Audience | Use case | Entry point |
 |---|---|---|
@@ -97,7 +106,7 @@ bp.issues          # steps that did not succeed, to show the user
 bp.to_bytes()      # the zip, for an HTTP response; or bp.write(path)
 ```
 
-Three sockets to plug your own pieces in:
+Three sockets for developer customization:
 
 - **Identity**: pass `creator=` with your user's ID.
 - **Storage**: implement `Storage.put(data, filename, access) -> resource` to keep documents in your store and enforce `access` there. `examples/storage_s3.py` is one.
@@ -221,10 +230,6 @@ Nothing else is stored except the creator ID file. See [PRIVACY.md](PRIVACY.md).
 ## Limits
 
 Sites behind aggressive bot protection may refuse a headless browser; the funnel falls back to what was typed and reports it. A crawl takes about a minute. EIN lookup covers US organizations only; other registries plug in through the fetcher socket.
-
-## Non-goals
-
-Hosting or storing backpacks, access enforcement, auth and accounts, cryptographic signatures, third-party verifier identity, parsing documents, a web UI, multi-language prompts, and profile depth beyond the minimum.
 
 ## License
 
