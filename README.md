@@ -1,45 +1,138 @@
 # Nonprofit Backpack
 
-A **Nonprofit Backpack** is a small, portable bundle of facts about a nonprofit: who it is, where it is registered, its headline numbers, a short description, and hashes of the documents that back those up. It is an [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundle, a directory of markdown files with YAML frontmatter, so anything that reads OKF can read it, and it says where every value came from and who has confirmed it.
+A **Nonprofit Backpack** is a small, portable bundle of facts about a nonprofit: who it is, where it is registered, its headline numbers, a short description, and hashes of the documents that back those up. It is an [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundle, markdown files with YAML frontmatter, and it records where every value came from and who confirmed it.
 
-This repository is the piping to create one: a Python library and a command, `nbp`. Facts about an organization go in; a validated backpack zip comes out. It is published as a digital public good for a cross-org working group to fork, extend, and fold into their own products. It is deliberately minimal.
+This repo is the piping to make one: a Python library and a command, `nbp`. Facts go in; a validated zip comes out. It is a deliberately minimal digital public good for others to fork and build on. It is not a web app.
+
+## Install
 
 ```
+git clone https://github.com/Guide-to-Good/nonprofit-backpack && cd nonprofit-backpack
+python -m venv .venv && source .venv/bin/activate
 pip install -e . && playwright install chromium
-nbp create                                   # interactive: four prompts, Enter skips any
-nbp create facts.yaml -o riverbend.zip       # from a facts file
-nbp create --ein 36-3673599 --url feedingamerica.org --doc audit.pdf -o ~/Downloads/fa.zip
-nbp check riverbend.zip
+export OPENROUTER_API_KEY=sk-or-...      # optional: enables drafting of summary, mission, vision
 ```
 
-## The funnel
+## Who uses it, and how
 
-The organization is asked for the essentials first, by hand. Each later step is optional and only fills what is still empty.
-
-| Step | Input | Fills |
+| Audience | Use case | Entry point |
 |---|---|---|
-| 1 | Essentials, typed | name, legal name, country, summary; optionally mission, vision, year founded, budget, staff, registration scheme and ID, website. Plus `access` for each file. |
-| 2 | EIN (US only) | registration, annual budget, year founded, from the IRS Form 990 via ProPublica |
-| 3 | Website | crawled up to 10 pages in headless Chromium; summary, mission and vision drafted by an LLM if `OPENROUTER_API_KEY` is set |
-| 4 | Documents | files or links, hashed with SHA-256, not parsed; each with a kind, period and `access` |
+| **Nonprofit staff** (an ED, or someone helping one) | Make a backpack for their own organization, answering questions | `nbp create` |
+| **Nonprofit staff** | Add a new audit or report later; review and sign off on what was drafted | `nbp add-doc`, `nbp confirm` |
+| **Platform or data teams** (CRMs, grants portals, TechSoup-style registries) | Export facts they already hold, one file per organization, and generate backpacks in bulk | `nbp create facts.yaml` |
+| **Developers and scripters** | Try a lookup quickly, or run from cron, CI or a Makefile | `nbp create --ein … --url … -y` |
+| **Product developers at member orgs** | Fold backpack creation into their own app, with their users, storage and registries | Python API, `examples/integrate_fastapi.py` |
+| **Funders, platforms, verifiers** | Check a backpack they received is valid, complete and still confirmed | `nbp check` |
+| **Working-group demos** | Show the flow end to end, in a terminal or a bare web form | `docs/DEMO.md`, the FastAPI example |
 
-**Precedence is fixed: typed beats fetched, fetched beats drafted.** Every value keeps the origin of whichever source won, and that origin is written into the bundle as provenance. Any combination works: EIN and website with nothing typed gives a fully tool-drafted backpack marked as such; typed only skips everything. Nothing is required to produce a *valid* backpack; a *complete* one has name, legal name, country and summary.
+### Nonprofit staff: `nbp create`
 
-The LLM sees everything when it drafts: the statements the organization typed (marked authoritative), the IRS facts, and the crawled pages. By default it writes only the statements that are still empty. `--redraft` lets it rewrite the typed ones too, using all of it; the typed originals are then cited as a source. Any step that does not succeed is reported at the end, and `backpack.issues` carries the same list for integrators.
+```
+nbp create
+```
 
-The same funnel is one function for integrators:
+Four prompts, Enter skips any: essentials, EIN, website, documents. Then who may read each file (`public` or `private`), then where to save the zip (default `~/Downloads`). It prints each step as it runs, lists any step that failed, and ends with your creator ID to keep.
+
+Later:
+
+```
+nbp add-doc ~/Downloads/my-backpack.zip audit.pdf --kind audit --period FY2025 --access private
+nbp confirm ~/Downloads/my-backpack.zip                      # sign off on every file
+nbp confirm ~/Downloads/my-backpack.zip --concept about.md   # or just one
+```
+
+### Platform and data teams: a facts file
+
+Another system writes one YAML file per organization; `nbp` turns each into a backpack. The file is also the thing you edit and re-run: the backpack ID is written back into it on the first run, so the organization keeps the same identity.
+
+```yaml
+# riverbend.yaml
+name: Riverbend Food Pantry
+legal_name: Riverbend Food Pantry Inc
+country: US
+summary: Riverbend Food Pantry distributes groceries to households in Riverbend County, Ohio.
+ein: 12-3456789                # optional: fills what is still empty from the IRS record
+website: riverbendpantry.example.org   # optional: crawled, used for drafting
+access: { organization: public, about: public }
+documents:
+  - { path: audit.pdf, kind: audit, period: FY2025, access: private }
+```
+
+```
+nbp create riverbend.yaml -o out/riverbend.zip
+for f in exports/*.yaml; do nbp create "$f" -y -o "out/$(basename "$f" .yaml).zip"; done
+```
+
+All fields: `name`, `legal_name`, `country`, `registration_scheme` (`nbp schemes` lists codes), `registration_id`, `year_founded`, `annual_budget`, `staff_count`, `website`, `summary`, `mission`, `vision`, `ein`, `crawl`, `access`, `documents`, `id`. Examples: `examples/facts-us.yaml`, `examples/facts-ke.yaml`.
+
+### Developers and scripters: flags
+
+```
+nbp create --ein 36-3673599 --url feedingamerica.org -o ~/Downloads/fa.zip    # asks access, then runs
+nbp create --ein 36-3673599 --url feedingamerica.org -y                       # no prompts, defaults
+```
+
+| Option | Effect |
+|---|---|
+| `--ein`, `--url`, `--doc` (repeatable) | Inputs, as in the funnel |
+| `-o PATH` | Output zip; default `~/Downloads/<name>-backpack.zip` |
+| `-y` | No prompts: public for organization and about, private for documents |
+| `--confirm` | Self-confirm every file at creation |
+| `--redraft` | Let the LLM rewrite typed statements using everything found |
+| `--no-fetch` | Skip lookup, crawl and drafting |
+| `--creator human:<uuid>` | Use a given creator ID instead of the saved one |
+| `-i` | Interactive, even with flags |
+
+### Product developers: the Python API
 
 ```python
 from nonprofit_backpack import Intake, DocumentInput, create_backpack
 
 intake = Intake(typed={"name": "Riverbend Food Pantry", "country": "US", "summary": "..."},
-                ein="12-3456789", website="https://riverbendpantry.example.org",
-                documents=[DocumentInput(path="audit.pdf", kind="audit", access="private")])
-backpack = create_backpack(intake, creator="human:<your user id>")
-backpack.write("riverbend-backpack.zip")        # or backpack.to_bytes() for an HTTP response
+                ein="12-3456789", website="riverbendpantry.example.org",
+                documents=[DocumentInput(path="audit.pdf", kind="audit", access="private")],
+                access={"organization": "public", "about": "public"})
+bp = create_backpack(intake, creator=f"human:{user.id}", storage=my_storage, log=progress.append)
+bp.issues          # steps that did not succeed, to show the user
+bp.to_bytes()      # the zip, for an HTTP response; or bp.write(path)
 ```
 
-`examples/integrate_fastapi.py` is the same thing behind a web form, in forty lines. The three fetchers can be swapped by passing your own callables to `resolve()`; `examples/make_examples.py` shows that.
+Three sockets to plug your own pieces in:
+
+- **Identity**: pass `creator=` with your user's ID.
+- **Storage**: implement `Storage.put(data, filename, access) -> resource` to keep documents in your store and enforce `access` there. `examples/storage_s3.py` is one.
+- **Fetchers**: call `resolve(intake, lookup_ein=…, crawl_site=…, draft=…)` to swap in your own registry lookup (say, a UK Charity Commission client), scraper or model. `examples/make_examples.py` does this with stubs.
+
+`examples/integrate_fastapi.py` shows it behind a web form with a live progress log. Run the crawl in a worker thread, not an `async` handler: the browser API it uses cannot run inside an event loop.
+
+### Funders, platforms, verifiers: `nbp check`
+
+```
+nbp check riverbend.zip              # or an unpacked directory
+```
+
+Reports errors, warnings and notes: OKF conformance, required keys, a UUID v4 `id`, `access` values, footnotes that resolve to `sources`, document hashes against the files, each file's confirmation status (confirmed, lapsed, unconfirmed), and completeness. Exits non-zero on errors, so it works in CI.
+
+### Demos
+
+```
+cat docs/DEMO.md                                                     # five-minute terminal walk-through
+uvicorn examples.integrate_fastapi:app --reload --port 8765          # the bare web form
+python examples/make_examples.py                                     # regenerate the example bundles
+```
+
+## How it works
+
+The organization is asked for the essentials first. Each later step is optional and only fills what is still empty.
+
+1. **Typed values** are recorded as the organization's own.
+2. **EIN** (US only): one call to ProPublica's Nonprofit Explorer API, which returns the IRS record and figures ProPublica already extracted from e-filed Form 990s. We do not fetch the 990 itself. Seven values fill empty fields: name, legal name, country, scheme, registration ID, year founded (the IRS ruling year, with a caveat) and annual budget (total expenses from the latest filing).
+3. **Website**: headless Chromium renders up to 10 same-domain pages, about, team and mission pages first, and extracts their text. The text is held in memory only, never stored in the backpack; the bundle records the site as a source.
+4. **Drafting**, once, if a key is set and there is something to write: the LLM receives the typed statements (marked authoritative), the IRS values with their caveats, and the page text. It writes only the summary, mission or vision that are still empty, unless `--redraft`. It never sees documents.
+5. **Documents** are hashed with SHA-256 and stored. They are never parsed.
+6. **Build** writes the files with provenance, then **check** validates them.
+
+**Precedence is fixed: typed beats fetched, fetched beats drafted.** Every value keeps the origin of whichever source won. Nothing is required for a *valid* backpack; a *complete* one has name, legal name, country and summary.
 
 ## Bundle shape
 
@@ -96,53 +189,43 @@ verified:                                  # confirmations, see below
 
 ## Provenance, identity and confirmation
 
-- **`generated.by`** is always the creator who ran the tool, `human:<uuid>`, so every file names the person responsible. When any value in a file was fetched or drafted, `generated.tool` records `nonprofit-backpack/<version>`, with the model appended when an LLM drafted any of it, and the body's Provenance section says which values came from where and which were typed.
-- **`sources`** and the body footnotes record which source each fetched value came from, keyed by `sources[].id` per OKF §5.1. Uncertain mappings carry a note rather than a silent guess.
-- **Creator ID.** `nbp` mints a UUID v4 the first time it runs and keeps it in `~/.config/nonprofit-backpack/creator.json`, writing it as `human:<uuid>`. Integrators pass their own user identity instead. What identity scheme the `by` field should ultimately use is for the governance group.
-- **Backpack ID.** The organization's UUID v4 is minted on first build and written back into the facts file, so regenerating next quarter keeps the same identity.
-- **Confirmation.** `nbp confirm backpack.zip` (or `create --confirm`) appends a self-attestation to each concept:
+- **`generated.by`** is always the creator, `human:<uuid>`. When any value in a file was fetched or drafted, `generated.tool` records `nonprofit-backpack/<version>`, plus the model if an LLM drafted any of it. The body's Provenance section says which values came from where.
+- **`sources`** lists every fetched source with a stable `id`; body footnotes cite those ids per OKF §5.1. The `[^id]: …` lines at the end of a body are standard markdown footnote definitions so renderers show them.
+- **Creator ID**: a UUID v4 minted on first run, kept in `~/.config/nonprofit-backpack/creator.json`. Integrators pass their own. The final identity scheme is for the governance group.
+- **Backpack ID**: minted on first build and written back into the facts file.
+- **Confirmation**: `nbp confirm` appends to each file
 
   ```yaml
   verified:
-    - by: human:<uuid>                 # the format of `by` is left to the governance/access/storage group
+    - by: human:<uuid>          # format of `by` left to the governance/access/storage group
       at: 2026-10-21T12:00:00Z
-      sha256: <canonical hash of this concept's content at check time>
-      proof: <optional: a URL to the verifier's record, or a bundle-relative path to an attestation>
+      sha256: <canonical hash of this file's content when confirmed>
+      proof: <optional: URL to a verifier's record, or a path to an attestation>
   ```
 
-  `sha256` binds the confirmation to the exact content checked. Edit the concept afterwards and `nbp check` reports it as **lapsed** until it is confirmed again. A third party later uses the same shape with a `proof`. The canonical content is defined in one function, `canonical_hash()` in `bundle.py`: drop the `verified` key, serialize the rest as YAML with keys sorted recursively, normalize the body to LF with no trailing whitespace, hash the UTF-8 of `---\n<yaml>---\n<body>`.
+  Edit the file afterwards and `nbp check` reports it **lapsed**. A third-party verifier uses the same shape with a `proof`. `canonical_hash()` in `bundle.py`: drop `verified`, YAML with keys sorted recursively, body with LF endings and no trailing whitespace, SHA-256 of `---\n<yaml>---\n<body>`.
 
 ## `access`: intent, enforced by storage
 
-Every concept file carries `access: public | private`, chosen by the organization at creation: `nbp create` asks for each file in every mode when run from a terminal (`--yes` takes the defaults: public for organization and about, private for documents; a facts file with an `access` block is not asked). It is a label expressing intent. **OKF has no access control**; whatever stores or serves a backpack is responsible for honoring the label. `index.md` and `log.md` are reserved by OKF and carry no frontmatter.
-
-Documents go through a one-method **storage socket**, `Storage.put(data, filename, access) -> resource`. The library hashes the bytes first, so the hash is the same whatever the backend. The default `LocalStorage` puts files in the zip's `files/` sidecar; `examples/storage_s3.py` shows the same socket against an object store that enforces `access`. Documents can be added later with `nbp add-doc`, by path or by URL.
-
-## Validation
-
-`nbp check <zip or directory>` reports errors, warnings and notes: OKF conformance (every concept has frontmatter and a `type`, the root index declares `okf_version`), the backpack's required keys, a UUID v4 `id`, `access` values, footnote labels that resolve to `sources[].id`, document hashes against the files in the zip, each concept's confirmation status, and completeness.
+Every file carries `access: public | private`, chosen by the organization at creation. **OKF has no access control**: the label records intent, and whatever stores or serves the backpack enforces it. For documents, that is the `Storage` adapter. `index.md` and `log.md` are reserved by OKF and carry no frontmatter.
 
 ## Configuration
 
 | Variable | Purpose |
 |---|---|
-| `OPENROUTER_API_KEY` | enables drafting; unset means summary, mission and vision stay as typed |
-| `OPENROUTER_MODEL` | default `anthropic/claude-sonnet-4.5` |
+| `OPENROUTER_API_KEY` | Enables drafting. Unset: drafting is skipped and reported. |
+| `OPENROUTER_MODEL` | Default `anthropic/claude-sonnet-4.5`. |
 
-There are no other settings and nothing is stored by the library except the creator ID file.
+Nothing else is stored except the creator ID file. See [PRIVACY.md](PRIVACY.md).
 
-## What the website step does and does not do
+## Limits
 
-It is a pure scrape: headless Chromium loads each page, waits for it to settle, scrolls so lazy content mounts, harvests embedded iframe text, and trafilatura extracts the readable text. Up to 10 same-domain pages, with pages that describe the organization (about, team, mission, impact…) first. Private and loopback addresses are refused. It takes about a minute. Sites behind aggressive bot protection may refuse a headless browser; the funnel then falls back to whatever was typed. Nothing from the pages is interpreted by code; only the LLM reads them, with the single prompt in `nonprofit_backpack/prompts/summary.md`.
-
-## Fork it
-
-Everything is self-contained: `git clone`, `pip install -e .`, `playwright install chromium`. Add your own fetchers by passing callables to `resolve()`, your own storage by implementing `Storage`, your own identity by passing `creator=`. The [demo walk-through](docs/DEMO.md) is five minutes in a terminal. See [CONTRIBUTING.md](CONTRIBUTING.md) and [PRIVACY.md](PRIVACY.md).
+Sites behind aggressive bot protection may refuse a headless browser; the funnel falls back to what was typed and reports it. A crawl takes about a minute. EIN lookup covers US organizations only; other registries plug in through the fetcher socket.
 
 ## Non-goals
 
-Hosting or storing backpacks, access enforcement, auth and accounts, cryptographic signatures, third-party verifier identity, parsing documents, a web UI, multi-language prompts, and any organization-profile depth beyond the minimum.
+Hosting or storing backpacks, access enforcement, auth and accounts, cryptographic signatures, third-party verifier identity, parsing documents, a web UI, multi-language prompts, and profile depth beyond the minimum.
 
-## License
+## Contributing and license
 
-Apache-2.0.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Apache-2.0.
