@@ -11,7 +11,9 @@ The repo includes the following tooling:
 - Backpack validator to check a backpack for formatting consistency
 - A simple example implementation of UI to create a backpack
 
-The nbp creation command generates a UUID for the user to keep as a unique key to prove their identity as owner of the backpack. The backpack bundle has been created to allow hashes of files to be kept as pointers for those files if they are to be stored in another system; the bundle itself is not constructed to retain files. 
+`nbp create` generates a creator ID (a UUID) for the user to keep. It is written into every file as the author and is how confirmations are attributed. It identifies the creator but does not prove identity; nothing is cryptographically signed.
+
+Each document is recorded by its SHA-256 hash. By default the file travels inside the zip in `files/`; a storage adapter can keep it in another system instead, leaving the hash and a link as the pointer.
 
 ## Install
 
@@ -126,6 +128,7 @@ Reports errors, warnings and notes: OKF conformance, required keys, a UUID v4 `i
 
 ```
 cat docs/DEMO.md                                                     # five-minute terminal walk-through
+pip install fastapi uvicorn python-multipart                        # only for the example web form
 uvicorn examples.integrate_fastapi:app --reload --port 8765          # the bare web form
 python examples/make_examples.py                                     # regenerate the example bundles
 ```
@@ -230,6 +233,10 @@ Nothing else is stored except the creator ID file. See [PRIVACY.md](PRIVACY.md).
 ## Limits
 
 Sites behind aggressive bot protection may refuse a headless browser; the funnel falls back to what was typed and reports it. A crawl takes about a minute. EIN lookup covers US organizations only; other registries plug in through the fetcher socket.
+
+## Non-goals
+
+Out of scope: hosting or storing backpacks, enforcing access, accounts, signatures, and parsing documents.
 
 ## License
 

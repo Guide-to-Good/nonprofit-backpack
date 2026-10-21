@@ -39,4 +39,4 @@ nbp check maji-safi.zip        # confirmed again
 nbp add-doc maji-safi.zip annual-report.pdf --kind "annual report" --period FY2025 --access public
 ```
 
-**6. Folding it into a UI.** Open `examples/integrate_fastapi.py`: forty lines, a form in, a zip out, same three calls as the CLI. Open `examples/storage_s3.py`: the one-method storage socket where `access` gets enforced.
+**6. Folding it into a UI.** Run `uvicorn examples.integrate_fastapi:app --reload --port 8765` (after `pip install fastapi uvicorn python-multipart`) and open http://localhost:8765. Submit the form: a progress page shows the same step log as the terminal, live, then any failed steps and a download button. Open `examples/integrate_fastapi.py` to show it is the same calls as the CLI, run in a worker thread. Open `examples/storage_s3.py`: the one-method storage socket where `access` gets enforced.
