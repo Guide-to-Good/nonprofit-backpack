@@ -75,7 +75,7 @@ def _interactive() -> Intake:
 
 def default_out(name: str) -> str:
     """~/Downloads/<name>-backpack.zip when ~/Downloads exists, else the current directory. Never the repo by default."""
-    fname = f"{(name or 'backpack').lower().replace(' ', '-')}-backpack.zip"
+    fname = f"{name.lower().replace(' ', '-')}-backpack.zip" if name else "backpack.zip"
     dl = Path.home() / "Downloads"
     return str(dl / fname) if dl.is_dir() else fname
 
