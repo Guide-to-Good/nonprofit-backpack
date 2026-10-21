@@ -182,8 +182,9 @@ def resolve(intake: Intake, *, fetch: bool = True, redraft: bool = False, log: C
 
 
 def ein_facts(r: Resolved) -> str:
-    """The IRS-derived values as one text block, so the LLM can use them alongside the pages."""
-    rows = [f"{k}: {v}" for k, v in r.values.items() if r.origin.get(k, Origin("")).source == "propublica"]
+    """The IRS-derived values as one text block, with their caveats, so the LLM can use them alongside the pages."""
+    rows = [f"{k}: {v}" + (f"   (note: {r.origin[k].note})" if r.origin[k].note else "")
+            for k, v in r.values.items() if r.origin.get(k, Origin("")).source == "propublica"]
     return "\n".join(rows)
 
 

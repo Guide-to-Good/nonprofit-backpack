@@ -26,8 +26,12 @@ class Draft:
     model: str = ""
 
 
+HEADINGS = r"\*{0,2}(?:SUMMARY|MISSION|VISION|FIELDS)(?::\*{0,2}|\*{0,2}:)"   # NAME:  **NAME:**  **NAME**:
+
+
 def _section(raw: str, name: str) -> str:
-    m = re.search(rf"{name}:\s*(.*?)(?=\n\s*(?:SUMMARY|MISSION|VISION|FIELDS):|\Z)", raw, re.S)
+    """Text between `NAME:` and the next section heading (or the end). Tolerates `**NAME:**` and an empty section."""
+    m = re.search(rf"\*{{0,2}}{name}(?::\*{{0,2}}|\*{{0,2}}:)[ \t]*\n?(.*?)(?=\n?[ \t]*{HEADINGS}|\Z)", raw, re.S)
     return (m.group(1) if m else "").strip()
 
 

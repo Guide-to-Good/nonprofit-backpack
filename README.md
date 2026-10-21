@@ -114,7 +114,7 @@ verified:                                  # confirmations, see below
 
 ## `access`: intent, enforced by storage
 
-Every concept file carries `access: public | private`, chosen by the organization at creation. It is a label expressing intent. **OKF has no access control**; whatever stores or serves a backpack is responsible for honoring the label. `index.md` and `log.md` are reserved by OKF and carry no frontmatter.
+Every concept file carries `access: public | private`, chosen by the organization at creation: `nbp create` asks for each file in every mode when run from a terminal (`--yes` takes the defaults: public for organization and about, private for documents; a facts file with an `access` block is not asked). It is a label expressing intent. **OKF has no access control**; whatever stores or serves a backpack is responsible for honoring the label. `index.md` and `log.md` are reserved by OKF and carry no frontmatter.
 
 Documents go through a one-method **storage socket**, `Storage.put(data, filename, access) -> resource`. The library hashes the bytes first, so the hash is the same whatever the backend. The default `LocalStorage` puts files in the zip's `files/` sidecar; `examples/storage_s3.py` shows the same socket against an object store that enforces `access`. Documents can be added later with `nbp add-doc`, by path or by URL.
 

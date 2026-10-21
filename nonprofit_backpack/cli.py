@@ -27,6 +27,15 @@ def _ask_access(what: str, default: str) -> str:
     return click.prompt(f"  {what}: access", type=click.Choice(ACCESS_VALUES), default=default, show_choices=True)
 
 
+def _ask_file_access(intake: Intake) -> None:
+    click.echo("\nWho may read each file? public = anyone the backpack is shared with; private = the organization decides per request.")
+    intake.access["organization"] = _ask_access("organization.md (registration and headline facts)", intake.access.get("organization", "public"))
+    intake.access["about"] = _ask_access("about.md (summary, mission, vision)", intake.access.get("about", "public"))
+    for d in intake.documents:
+        d.access = _ask_access(f"documents/{Path(d.path or d.url).name}", d.access)
+    intake.access_asked = True  # type: ignore[attr-defined]
+
+
 def _interactive() -> Intake:
     """The funnel as prompts. Enter skips any step."""
     intake = Intake()
@@ -40,9 +49,7 @@ def _interactive() -> Intake:
             v = click.prompt(f"  {label}", default="", show_default=False)
             if v.strip():
                 intake.typed[k] = v.strip()
-    click.echo("\nWho may read each file? public = anyone the backpack is shared with; private = the organization decides per request.")
-    intake.access["organization"] = _ask_access("organization.md (registration and headline facts)", "public")
-    intake.access["about"] = _ask_access("about.md (summary, mission, vision)", "public")
+    _ask_file_access(intake)
 
     click.echo("\nStep 2 of 4: EIN, for US organizations. Fills registration, budget and year founded where still empty.")
     intake.ein = click.prompt("  EIN", default="", show_default=False).strip()
@@ -84,7 +91,8 @@ def default_out(name: str) -> str:
 @click.option("--no-fetch", is_flag=True, help="Skip EIN lookup, crawling and drafting.")
 @click.option("--redraft", is_flag=True, help="Let the LLM rewrite typed summary/mission/vision using everything (typed text, IRS facts, pages).")
 @click.option("-i", "--interactive", is_flag=True, help="Prompt for everything step by step (default when no facts file or flags are given).")
-def create(facts, ein, website, doc, out, creator, self_confirm, no_fetch, redraft, interactive):
+@click.option("-y", "--yes", is_flag=True, help="Do not prompt for anything; use defaults (access public for organization/about, private for documents).")
+def create(facts, ein, website, doc, out, creator, self_confirm, no_fetch, redraft, interactive, yes):
     """Create a backpack from a FACTS file, from flags, or interactively."""
     asked = False
     if facts:
@@ -100,8 +108,11 @@ def create(facts, ein, website, doc, out, creator, self_confirm, no_fetch, redra
     intake.documents += [DocumentInput(path=p) for p in doc]
     if not intake.typed.get("name") and not intake.ein and not intake.website:
         raise click.UsageError("nothing to build from: give a name, an EIN or a website")
+    # Sharing permissions are asked for every file at creation, in every mode, unless --yes or the facts file set them.
+    if not yes and not asked and sys.stdin.isatty() and not (facts and "access" in (yaml.safe_load(Path(facts).read_text()) or {})):
+        _ask_file_access(intake)
 
-    if asked and not out:
+    if not yes and not out and sys.stdin.isatty():
         out = click.prompt("\nWhere should the backpack zip be written?", default=default_out(intake.typed.get("name", "")))
     click.echo("")
     bp = create_backpack(intake, creator=creator, fetch=not no_fetch, redraft=redraft, self_confirm=self_confirm, log=echo)
