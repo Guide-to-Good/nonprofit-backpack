@@ -126,6 +126,7 @@ def resolve(intake: Intake, *, fetch: bool = True, redraft: bool = False, log: C
             return
         store[k] = str(value); r.origin[k] = origin
 
+    irs_name: tuple[str, Origin] | None = None
     ein = propublica.normalize_ein(intake.ein) if intake.ein else None
     if intake.ein and not ein:
         fail(f"EIN {intake.ein!r} is not nine digits; skipped.")
@@ -138,6 +139,9 @@ def resolve(intake: Intake, *, fetch: bool = True, redraft: bool = False, log: C
         if result:
             r.sources.append(result.source)
             for k, value, note in result.fields:
+                if k == "name":      # the IRS name is usually the legal form; the everyday name comes from the site, this is the fallback
+                    irs_name = (value, Origin("tool", result.source["id"], note))
+                    continue
                 fill(k, value, Origin("tool", result.source["id"], note), r.values)
             log(f"IRS record found: {result.name}")
         else:
@@ -166,18 +170,27 @@ def resolve(intake: Intake, *, fetch: bool = True, redraft: bool = False, log: C
             try:
                 d = (draft or drafting.draft)(material)
                 r.llm_model = d.model
+                citable = {m["id"] for m in material if m["id"] != "propublica" or not r.pages}
+                fallback = "website" if r.pages else ("propublica" if "propublica" in citable else "")
+                org_name = r.values.get("name") or d.fields.get("name", "")
                 for k in want:
-                    if not d.texts.get(k, "").strip():
+                    text = drafting.clean_citations(d.texts.get(k, ""), citable, fallback, org_name)
+                    if k in ("mission", "vision"):
+                        text = drafting.normalize_statement(text, fallback, org_name)
+                    if not text:
                         continue
                     if k in typed_texts:   # redraft: the typed statement becomes a cited source of the new one
                         _add_source(r, "organization", "statements typed by the organization at intake", "Statements typed by the organization")
-                    r.texts[k] = d.texts[k]; r.origin[k] = Origin("llm", "website" if r.pages else "propublica")
+                    r.texts[k] = text; r.origin[k] = Origin("llm", fallback)
+                notes = {"name": "the name the organization uses on its website"}
                 for k, value in d.fields.items():
-                    fill(k, value, Origin("llm", "website", "suggested by the LLM from the website text"), r.values)
+                    fill(k, value, Origin("llm", "website", notes.get(k, "suggested by the LLM from the website text")), r.values)
             except Exception as e:
                 fail(f"Drafting failed: {e}")
         else:
             fail("OPENROUTER_API_KEY not set; skipped drafting. Summary, mission and vision stay as typed.")
+    if irs_name:   # nothing typed or found on the site: fall back to the IRS name, with its caveat
+        fill("name", irs_name[0], irs_name[1], r.values)
     return r
 
 
@@ -196,7 +209,9 @@ def draft_material(r: Resolved, typed_texts: dict[str, str]) -> list[dict]:
                          "text": "\n\n".join(f"{k.upper()}: {v}" for k, v in typed_texts.items())})
     facts = ein_facts(r)
     if facts:
-        material.append({"id": "propublica", "title": "IRS Form 990 facts via ProPublica", "text": facts})
+        title = ("IRS facts via ProPublica (context only: do not cite, and do not restate its years or figures)" if r.pages
+                 else "IRS Form 990 facts via ProPublica")
+        material.append({"id": "propublica", "title": title, "text": facts})
     material += [{"id": "website", "title": p.title or p.url, "text": p.text} for p in r.pages]
     return material
 
