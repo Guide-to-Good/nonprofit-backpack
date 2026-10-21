@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "nonprofit-backpack"
 version = "0.1.0"
 description = "Create a Nonprofit Backpack: a minimal OKF v0.2 bundle describing a nonprofit, with provenance."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
   "click>=8.1",
