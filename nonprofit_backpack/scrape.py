@@ -136,8 +136,10 @@ def _extract(html: str, url: str, embeds: str) -> str:
     return text.strip()[:MAX_CHARS_PER_PAGE]
 
 
-def crawl(url: str, max_pages: int = MAX_PAGES) -> list[Page]:
-    """Render the start page and up to max_pages-1 same-domain pages. Raises ScrapeError if nothing is readable."""
+def crawl(url: str, max_pages: int = MAX_PAGES, on_page=None) -> list[Page]:
+    """Render the start page and up to max_pages-1 same-domain pages. Raises ScrapeError if nothing is readable.
+    `on_page(i, max_pages, url)` is called before each page loads, for progress display."""
+    notify = on_page or (lambda i, n, u: None)
     err = check_url_allowed(url)
     if err:
         raise ScrapeError(err)
@@ -149,6 +151,7 @@ def crawl(url: str, max_pages: int = MAX_PAGES) -> list[Page]:
         try:
             ctx = browser.new_context(viewport=VIEWPORT, user_agent=USER_AGENT)
             page = ctx.new_page()
+            notify(1, max_pages, url)
             first = _render(page, url)
             if first is None:
                 alt = _domain_variant(url)
@@ -165,6 +168,7 @@ def crawl(url: str, max_pages: int = MAX_PAGES) -> list[Page]:
                     break
                 if check_url_allowed(link) or any(p.url == link for p in pages):
                     continue
+                notify(len(pages) + 1, max_pages, link)
                 r = _render(page, link)
                 if not r:
                     continue

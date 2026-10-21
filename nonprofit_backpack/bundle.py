@@ -18,7 +18,7 @@ import httpx
 import yaml
 
 from .identity import new_backpack_id
-from .intake import DocumentInput, Resolved, FIELDS, TEXTS
+from .intake import DocumentInput, Origin, Resolved, FIELDS, TEXTS
 from .storage import Storage, LocalStorage
 
 RESERVED = ("index.md", "log.md")
@@ -78,6 +78,7 @@ class Backpack:
     files: dict[str, bytes] = field(default_factory=dict)      # files/<name> sidecar contents
     log: list[str] = field(default_factory=list)               # log.md lines under today's date, newest first
     title: str = ""
+    issues: list[str] = field(default_factory=list)            # funnel steps that did not succeed (not written to the bundle)
 
     @property
     def id(self) -> str:
@@ -158,13 +159,15 @@ def _num(v: str):
             return v
 
 
-def _generated_by(r: Resolved, keys: list[str], tool: str) -> str:
-    """Concept-level actor: the tool only if every present value is still tool- or LLM-provided.
-    `website` is excluded: like the EIN, it is a key the organization supplies to run the tool, not a fact it authored."""
+def _generated(r: Resolved, keys: list[str], tool: str, at: str) -> dict:
+    """`generated.by` is always the creator who ran the tool, so every file names the person. When any present
+    value was fetched or drafted, `generated.tool` records the tool version (and model) that supplied it; the
+    body's Provenance section says which values."""
     present = [k for k in keys if k != "website" and (r.values.get(k) or r.texts.get(k) or "").strip()]
-    if present and all(r.origin[k].by != "human" for k in present):
-        return tool + (f"+{r.llm_model}" if any(r.origin[k].by == "llm" for k in present) and r.llm_model else "")
-    return r.creator  # type: ignore[attr-defined]
+    g = {"by": r.creator, "at": at}  # type: ignore[attr-defined]
+    if any(r.origin[k].by != "human" for k in present):
+        g["tool"] = tool + (f"+{r.llm_model}" if any(r.origin[k].by == "llm" for k in present) and r.llm_model else "")
+    return g
 
 
 def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, log=lambda m: None) -> Backpack:
@@ -180,7 +183,7 @@ def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, l
     # organization.md
     fm: dict = {"id": r.id, "type": "Organization", "title": v.get("name", ""), "legal_name": v.get("legal_name", ""),
                 "access": r.access.get("organization", "public"),
-                "generated": {"by": _generated_by(r, [k for k, _ in FIELDS], tool), "at": at}}
+                "generated": _generated(r, [k for k, _ in FIELDS], tool, at)}
     reg = {k2: v[k1] for k1, k2 in (("country", "country"), ("registration_scheme", "scheme"), ("registration_id", "id")) if v.get(k1)}
     if reg:
         fm["registration"] = reg
@@ -197,6 +200,9 @@ def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, l
         if o and o.source and v.get(k, "").strip():
             used.add(o.source)
             lines.append(f"- `{k}`" + (f": {o.note}" if o.note else "") + f"[^{o.source}]")
+    human = [k for k, _ in FIELDS if k != "website" and r.origin.get(k, Origin("")).by == "human" and v.get(k, "").strip()]
+    if lines and human:
+        lines.append("- typed by the organization: " + ", ".join(f"`{k}`" for k in human))
     body = ("# Provenance\n\n" + "\n".join(lines) + "\n\n" + _footnotes(r.sources, used) + "\n") if lines \
         else "# Provenance\n\nAll values entered by the organization.\n"
     bp.concepts.append(Concept("organization.md", fm, body))
@@ -204,7 +210,7 @@ def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, l
     # about.md
     fm = {"type": "About", "title": f"About {v.get('name', '')}", "organization": "./organization.md",
           "access": r.access.get("about", "public"),
-          "generated": {"by": _generated_by(r, [k for k, _ in TEXTS], tool), "at": at}}
+          "generated": _generated(r, [k for k, _ in TEXTS], tool, at)}
     if r.sources:
         fm["sources"] = r.sources
     sections = [f"# {k.capitalize()}\n\n{r.texts[k].strip()}" for k, _ in TEXTS if r.texts.get(k, "").strip()]
@@ -217,7 +223,7 @@ def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, l
     for d in r.documents:
         _add_document_concept(bp, d, creator, storage, at, log)
     bp.files.update(storage.collect())
-    bp.log.append(f"**Creation**: created by {tool} at {at}.")
+    bp.log.append(f"**Creation**: created by {creator} with {tool} at {at}.")
     log(f"Built backpack {r.id} with {len(bp.documents())} document(s).")
     return bp
 

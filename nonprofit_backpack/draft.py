@@ -40,12 +40,13 @@ def parse(raw: str, model: str) -> Draft:
     return Draft(texts={k: _section(raw, k.upper()) for k in ("summary", "mission", "vision")}, fields=fields, model=model)
 
 
-def draft(pages, model: str | None = None) -> Draft:
+def draft(material: list[dict], model: str | None = None) -> Draft:
+    """`material` is a list of {id, title, text}; ids are the sources[].id the footnotes must use."""
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
     model = model or os.environ.get("OPENROUTER_MODEL") or DEFAULT_MODEL
-    material = "\n\n".join(f"=== source id: website ({p.title or p.url}) ===\n{p.text}" for p in pages)[:MAX_INPUT_CHARS]
+    material = "\n\n".join(f"=== source id: {m['id']} ({m['title']}) ===\n{m['text']}" for m in material)[:MAX_INPUT_CHARS]
     resp = httpx.post(ENDPOINT, timeout=120.0,
                       headers={"authorization": f"Bearer {key}", "content-type": "application/json",
                                "HTTP-Referer": "https://github.com/Guide-to-Good/nonprofit-backpack", "X-Title": "nonprofit-backpack"},

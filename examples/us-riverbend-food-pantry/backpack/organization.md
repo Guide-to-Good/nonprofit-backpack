@@ -7,6 +7,7 @@ access: public
 generated:
   by: human:7f1e6c0a-3b2d-4e8f-9a1b-2c3d4e5f6a7b
   at: '2026-10-21T12:00:00Z'
+  tool: nonprofit-backpack/0.1.0+openrouter:anthropic/claude-sonnet-4.5
 registration:
   country: US
   scheme: IRS-EIN
@@ -25,7 +26,7 @@ sources:
 verified:
 - by: human:7f1e6c0a-3b2d-4e8f-9a1b-2c3d4e5f6a7b
   at: '2026-10-21T12:00:00Z'
-  sha256: 887eb4e441bd2109d16cc8f267d26d78542dde7659b33796befd4cf5752ec624
+  sha256: 47ade9790762d696ffd91f25893bcad4462475154141745028419e262a0ea016
 ---
 
 # Provenance
@@ -37,6 +38,7 @@ verified:
 - `year_founded`: IRS ruling year, when tax-exempt status was granted, which is not always the founding year[^propublica]
 - `annual_budget`: total expenses in USD from the Form 990 for the fiscal year ending 2025-06[^propublica]
 - `staff_count`: suggested by the LLM from the website text[^website]
+- typed by the organization: `name`
 
 [^propublica]: IRS Form 990 data for EIN 12-3456789 via ProPublica Nonprofit Explorer
 [^website]: Organization website

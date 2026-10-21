@@ -66,22 +66,31 @@ def _interactive() -> Intake:
     return intake
 
 
+def default_out(name: str) -> str:
+    """~/Downloads/<name>-backpack.zip when ~/Downloads exists, else the current directory. Never the repo by default."""
+    fname = f"{(name or 'backpack').lower().replace(' ', '-')}-backpack.zip"
+    dl = Path.home() / "Downloads"
+    return str(dl / fname) if dl.is_dir() else fname
+
+
 @main.command()
 @click.argument("facts", required=False, type=click.Path(exists=True, dir_okay=False))
 @click.option("--ein", default="", help="US EIN to look up on ProPublica.")
 @click.option("--url", "website", default="", help="Website to crawl.")
 @click.option("--doc", multiple=True, type=click.Path(exists=True, dir_okay=False), help="Document file to hash and include (repeatable).")
-@click.option("-o", "--out", default="", help="Output zip (default: <name>-backpack.zip).")
+@click.option("-o", "--out", default="", help="Output zip (default: ~/Downloads/<name>-backpack.zip; asked for interactively).")
 @click.option("--creator", default=None, help="Creator actor, e.g. human:<uuid>. Default: the saved one in ~/.config/nonprofit-backpack.")
 @click.option("--confirm", "self_confirm", is_flag=True, help="Self-confirm every concept (adds verified entries with content hashes).")
 @click.option("--no-fetch", is_flag=True, help="Skip EIN lookup, crawling and drafting.")
+@click.option("--redraft", is_flag=True, help="Let the LLM rewrite typed summary/mission/vision using everything (typed text, IRS facts, pages).")
 @click.option("-i", "--interactive", is_flag=True, help="Prompt for everything step by step (default when no facts file or flags are given).")
-def create(facts, ein, website, doc, out, creator, self_confirm, no_fetch, interactive):
+def create(facts, ein, website, doc, out, creator, self_confirm, no_fetch, redraft, interactive):
     """Create a backpack from a FACTS file, from flags, or interactively."""
+    asked = False
     if facts:
         intake = Intake.from_file(facts)
     elif interactive or not (ein or website or doc):
-        intake = _interactive()
+        intake = _interactive(); asked = True
     else:
         intake = Intake()
     if ein:
@@ -92,10 +101,17 @@ def create(facts, ein, website, doc, out, creator, self_confirm, no_fetch, inter
     if not intake.typed.get("name") and not intake.ein and not intake.website:
         raise click.UsageError("nothing to build from: give a name, an EIN or a website")
 
-    bp = create_backpack(intake, creator=creator, fetch=not no_fetch, self_confirm=self_confirm, log=echo)
-    name = bp.title or "backpack"
-    out = out or f"{name.lower().replace(' ', '-')}-backpack.zip"
+    if asked and not out:
+        out = click.prompt("\nWhere should the backpack zip be written?", default=default_out(intake.typed.get("name", "")))
+    click.echo("")
+    bp = create_backpack(intake, creator=creator, fetch=not no_fetch, redraft=redraft, self_confirm=self_confirm, log=echo)
+    out = str(Path(out or default_out(bp.title)).expanduser())
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
     bp.write(out)
+    if bp.issues:
+        click.echo("\nSteps that did not succeed:", err=True)
+        for i in bp.issues:
+            click.echo(f"  ✗ {i}", err=True)
     if facts and not intake.id:            # keep the organization id stable across runs
         data = yaml.safe_load(Path(facts).read_text()) or {}
         data["id"] = bp.id
@@ -103,9 +119,11 @@ def create(facts, ein, website, doc, out, creator, self_confirm, no_fetch, inter
         echo(f"Wrote id {bp.id} back into {facts}.")
     elif not intake.id:
         echo(f"Backpack id {bp.id}: keep it, and pass it as `id:` next time so the backpack stays the same organization.")
-    echo(f"Creator: {get_creator_id(creator)}")
-    click.echo(out)
+    click.echo(f"\nYour creator ID is {get_creator_id(creator)}\nCopy it and keep it: it is written into every file as `generated.by`, and it is how your "
+               f"confirmations are attributed. Pass it with --creator on another machine.\n", err=True)
+    click.echo(f"Backpack written to {out}", err=True)
     _report(run_check(out))
+    click.echo(out)
 
 
 @main.command()

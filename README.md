@@ -8,7 +8,7 @@ This repository is the piping to create one: a Python library and a command, `nb
 pip install -e . && playwright install chromium
 nbp create                                   # interactive: four prompts, Enter skips any
 nbp create facts.yaml -o riverbend.zip       # from a facts file
-nbp create --ein 53-0196605 --url example.org --doc audit.pdf
+nbp create --ein 36-3673599 --url feedingamerica.org --doc audit.pdf -o ~/Downloads/fa.zip
 nbp check riverbend.zip
 ```
 
@@ -24,6 +24,8 @@ The organization is asked for the essentials first, by hand. Each later step is 
 | 4 | Documents | files or links, hashed with SHA-256, not parsed; each with a kind, period and `access` |
 
 **Precedence is fixed: typed beats fetched, fetched beats drafted.** Every value keeps the origin of whichever source won, and that origin is written into the bundle as provenance. Any combination works: EIN and website with nothing typed gives a fully tool-drafted backpack marked as such; typed only skips everything. Nothing is required to produce a *valid* backpack; a *complete* one has name, legal name, country and summary.
+
+The LLM sees everything when it drafts: the statements the organization typed (marked authoritative), the IRS facts, and the crawled pages. By default it writes only the statements that are still empty. `--redraft` lets it rewrite the typed ones too, using all of it; the typed originals are then cited as a source. Any step that does not succeed is reported at the end, and `backpack.issues` carries the same list for integrators.
 
 The same funnel is one function for integrators:
 
@@ -64,8 +66,9 @@ title: Riverbend Food Pantry               # organization name                  
 legal_name: Riverbend Food Pantry Inc      #                                           (required)
 access: public                             # who may read this file: public | private  (required)
 generated:                                 # who produced the current content          (required)
-  by: human:7f1e6c0a-…                     # or nonprofit-backpack/0.1.0[+openrouter:<model>]
+  by: human:7f1e6c0a-…                     # always the creator who ran the tool
   at: '2026-10-21T12:00:00Z'
+  tool: nonprofit-backpack/0.1.0+openrouter:anthropic/claude-sonnet-4.5   # present when any value was fetched or drafted
 registration: { country: US, scheme: IRS-EIN, id: 12-3456789 }   # optional from here on
 year_founded: 2009
 annual_budget: 412350                      # total annual expenses, a number
@@ -87,13 +90,13 @@ verified:                                  # confirmations, see below
 [^propublica]: IRS Form 990 data for EIN 12-3456789 via ProPublica Nonprofit Explorer
 ```
 
-`about.md` holds `# Summary`, `# Mission` and `# Vision` (only the ones present), points at `./organization.md`, and carries the same `sources`. A drafted summary footnotes each sentence to the source it came from. It is a separate file so a verifier can vouch for the registration and financial facts without endorsing the narrative.
+`about.md` holds `# Summary`, `# Mission` and `# Vision` (only the ones present), points at `./organization.md`, and carries the same `sources`. A drafted summary footnotes each sentence to the source it came from. The `[^website]: …` lines at the end of a body are standard markdown footnote definitions so renderers show the footnotes; the real join key is `sources[].id` in the frontmatter, per OKF §5.1. It is a separate file so a verifier can vouch for the registration and financial facts without endorsing the narrative.
 
 `documents/<slug>.md` has `title`, `kind`, optional `period`, `resource` (a path into `files/` or a URL), `sha256` of the bytes, and `access`. Documents are never parsed.
 
 ## Provenance, identity and confirmation
 
-- **`generated.by`** uses OKF's actor convention. A concept whose present values all came from the lookup, the crawl or the LLM is attributed to `nonprofit-backpack/<version>`, with the model appended when an LLM drafted any of it. Once the organization types or edits a value, the concept is attributed to its creator. The EIN and website URL are keys the organization supplies to run the tool, so they do not count as authored facts.
+- **`generated.by`** is always the creator who ran the tool, `human:<uuid>`, so every file names the person responsible. When any value in a file was fetched or drafted, `generated.tool` records `nonprofit-backpack/<version>`, with the model appended when an LLM drafted any of it, and the body's Provenance section says which values came from where and which were typed.
 - **`sources`** and the body footnotes record which source each fetched value came from, keyed by `sources[].id` per OKF §5.1. Uncertain mappings carry a note rather than a silent guess.
 - **Creator ID.** `nbp` mints a UUID v4 the first time it runs and keeps it in `~/.config/nonprofit-backpack/creator.json`, writing it as `human:<uuid>`. Integrators pass their own user identity instead. What identity scheme the `by` field should ultimately use is for the governance group.
 - **Backpack ID.** The organization's UUID v4 is minted on first build and written back into the facts file, so regenerating next quarter keeps the same identity.
