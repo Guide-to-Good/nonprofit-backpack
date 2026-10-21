@@ -1,0 +1,14 @@
+# A US organization: a few essentials typed, the rest from the EIN lookup and the website.
+# The EIN below is fictional; `make_examples.py` injects a stubbed lookup so the example is reproducible.
+name: Riverbend Food Pantry
+ein: 12-3456789
+website: https://riverbendpantry.example.org
+access:
+  organization: public
+  about: public
+documents:
+  - path: examples/files/riverbend-fy2025-audit.txt
+    title: FY2025 audited financial statements
+    kind: audit
+    period: FY2025
+    access: private

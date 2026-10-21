@@ -1,0 +1,42 @@
+# Demo: five minutes in a terminal
+
+Setup once: `pip install -e . && playwright install chromium`. Optional: `export OPENROUTER_API_KEY=...` to see drafting.
+
+**1. The typed path, no network.** Show `examples/facts-ke.yaml`, then:
+
+```
+nbp create examples/facts-ke.yaml --no-fetch --confirm -o maji-safi.zip
+unzip -o maji-safi.zip -d maji-safi && cat maji-safi/backpack/organization.md maji-safi/backpack/about.md
+```
+
+Point at: `generated.by` is the creator, `access` on each file, the `verified` entry with its content hash, the document hashed into `files/`.
+
+**2. The lookup path.** A real EIN and a real website, nothing typed:
+
+```
+nbp create --ein 530196605 --url feedingamerica.org -o live.zip
+```
+
+Watch the step log: IRS record found, 10 pages fetched, drafting (or "OPENROUTER_API_KEY not set"). Open `organization.md`: the Provenance section footnotes each prefilled value to its source, with notes on the two uncertain mappings (ruling year, fiscal year of the budget). Open `about.md`: a drafted summary with `[^website]` on each sentence, or empty if no key.
+
+**3. Combinations.** Typed essentials plus an EIN: typed values win, the rest fills in.
+
+```
+nbp create -i          # answer the first three prompts, then give the EIN, skip the rest
+```
+
+**4. Change after confirmation.** Edit `organization.md` inside `maji-safi.zip` (any value), then:
+
+```
+nbp check maji-safi.zip        # organization.md: lapsed (content changed after confirmation)
+nbp confirm maji-safi.zip --concept organization.md
+nbp check maji-safi.zip        # confirmed again
+```
+
+**5. Add a document later, by file or by link.**
+
+```
+nbp add-doc maji-safi.zip annual-report.pdf --kind "annual report" --period FY2025 --access public
+```
+
+**6. Folding it into a UI.** Open `examples/integrate_fastapi.py`: forty lines, a form in, a zip out, same three calls as the CLI. Open `examples/storage_s3.py`: the one-method storage socket where `access` gets enforced.

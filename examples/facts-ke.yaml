@@ -1,0 +1,25 @@
+name: Maji Safi Initiative
+legal_name: Maji Safi Community Water Initiative
+country: KE
+registration_scheme: KE-NGOB
+registration_id: OP.218/051/23-0456/11234
+year_founded: 2016
+annual_budget: 18400000
+staff_count: 11
+website: https://majisafi.example.org
+crawl: false
+summary: Maji Safi Initiative works with villages in Nakuru County, Kenya, to build
+  and maintain protected springs and household rainwater tanks. It trains local water
+  committees to manage repairs and collect maintenance fees so systems keep working
+  after construction.
+mission: Safe water, managed locally, for every household in Nakuru County.
+vision: Communities that own and sustain their own water systems.
+access:
+  organization: public
+  about: public
+documents:
+- path: examples/files/maji-safi-registration.txt
+  title: NGO Board registration certificate
+  kind: registration certificate
+  access: private
+id: f42e0cb8-84f1-49ab-aaa5-af44e2a90bb9
