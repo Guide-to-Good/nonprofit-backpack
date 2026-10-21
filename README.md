@@ -2,7 +2,7 @@
 
 A **Nonprofit Backpack** is a small, portable bundle of facts about a nonprofit: who it is, where it is registered, its headline numbers, a short description, and hashes of the documents that back those up. It is an [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundle, markdown files with YAML frontmatter, and it records where every value came from and who confirmed it.
 
-This repo is the piping to make one: a Python library and a command, `nbp`. Facts go in; a validated zip comes out. It is a deliberately minimal digital public good for others to fork and build on. It is not a web app.
+This repo is the piping to make one: a Python library and a command, `nbp`. Facts go in; a validated zip comes out. It is a deliberately minimal digital public good, MIT-licensed, for others to fork and build on. It is not a web app.
 
 ## Install
 
@@ -226,6 +226,10 @@ Sites behind aggressive bot protection may refuse a headless browser; the funnel
 
 Hosting or storing backpacks, access enforcement, auth and accounts, cryptographic signatures, third-party verifier identity, parsing documents, a web UI, multi-language prompts, and profile depth beyond the minimum.
 
-## Contributing and license
+## License
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Apache-2.0.
+Open source under the [MIT License](LICENSE): use, copy, modify, merge, publish, distribute, sublicense and sell it, in your own products too, provided the copyright and license notice stay with it. No warranty.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Contributions are accepted under the same MIT License.

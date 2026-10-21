@@ -7,7 +7,7 @@ name = "nonprofit-backpack"
 version = "0.1.0"
 description = "Create a Nonprofit Backpack: a minimal OKF v0.2 bundle describing a nonprofit, with provenance."
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
   "click>=8.1",
