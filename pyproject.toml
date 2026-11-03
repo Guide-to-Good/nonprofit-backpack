@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nonprofit-backpack"
-version = "0.1.0"
+version = "0.2.0"
 description = "Create a Nonprofit Backpack: a minimal OKF v0.2 bundle describing a nonprofit, with provenance."
 readme = "README.md"
 license = "MIT"

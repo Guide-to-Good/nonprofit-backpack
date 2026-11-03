@@ -11,20 +11,16 @@ Three things an integrator must get right, all shown here:
   * pass a `log` callable and show `backpack.issues`, so a failed lookup or crawl is visible, not silent.
   * supply the creator identity. Here it is the same saved creator ID the CLI uses; a real app passes
     its own user id, e.g. f"human:{user.id}".
-Documents go to LocalStorage (inside the zip) unless you pass a Storage adapter (see storage_s3.py).
 """
 from __future__ import annotations
 
-import html
-import tempfile
 import threading
 import uuid
-from pathlib import Path
 
-from fastapi import FastAPI, Form, UploadFile
+from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from nonprofit_backpack import DocumentInput, Intake, create_backpack, get_creator_id
+from nonprofit_backpack import Intake, create_backpack, get_creator_id
 
 app = FastAPI()
 JOBS: dict[str, dict] = {}          # id -> {lines, done, error, issues, filename, data, backpack_id}; in-memory, demo only
@@ -32,19 +28,17 @@ JOBS: dict[str, dict] = {}          # id -> {lines, done, error, issues, filenam
 HEAD = """<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Nonprofit Backpack</title><link rel=stylesheet href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"></head><body><main class=container>"""
 FORM = HEAD + """<hgroup><h1>Nonprofit Backpack</h1><p>Fill in what you have. Typed values win; the EIN and website fill the rest. You get a zip.</p></hgroup>
-<form method=post enctype=multipart/form-data>
+<form method=post>
 <article><h2>1. Essentials</h2>
-<div class=grid><label>Organization name <input name=name></label><label>Organization legal name <input name=legal_name></label></div>
+<div class=grid><label>Organization name <input name=name></label><label>Registration ID <input name=registration_id></label></div>
 <div class=grid><label>Country (ISO code) <input name=country placeholder="US"></label>
 <label>Access for organization.md <select name=access_org><option>public<option>private</select></label></div>
-<label>Summary <textarea name=summary rows=3 placeholder="2-3 sentences: who you are and what you do"></textarea></label>
+<label>Summary <textarea name=summary rows=2 placeholder="One sentence: who you are and what you do"></textarea></label>
 <div class=grid><label>Access for about.md <select name=access_about><option>public<option>private</select></label>
 <label><input type=checkbox name=redraft value=1> Let the LLM redraft my summary using everything found</label></div></article>
 <article><h2>2. EIN and 3. Website <small>(optional)</small></h2>
-<div class=grid><label>EIN (US) <input name=ein placeholder="12-3456789"></label><label>Website <input name=website placeholder="example.org"></label></div></article>
-<article><h2>4. Document <small>(optional)</small></h2>
-<div class=grid><label>File <input type=file name=document></label><label>Kind <input name=kind placeholder="audit, registration certificate"></label>
-<label>Access <select name=access><option>private<option>public</select></label></div></article>
+<div class=grid><label>EIN (US) <input name=ein placeholder="12-3456789"></label><label>Website <input name=website placeholder="example.org"></label></div>
+<small>The website is crawled to draft the tags, and the summary if you left it empty.</small></article>
 <button>Create backpack</button> <small>Creator: <code>CREATOR</code></small>
 </form></main></body></html>"""
 PROGRESS = HEAD + """<h1 id=title aria-busy=true>Building your backpack…</h1>
@@ -75,16 +69,11 @@ def form():
 
 
 @app.post("/")
-def start(name: str = Form(""), legal_name: str = Form(""), country: str = Form(""), summary: str = Form(""),
+def start(name: str = Form(""), country: str = Form(""), registration_id: str = Form(""), summary: str = Form(""),
           access_org: str = Form("public"), access_about: str = Form("public"), redraft: str = Form(""),
-          ein: str = Form(""), website: str = Form(""), kind: str = Form(""), access: str = Form("private"),
-          document: UploadFile | None = None):
-    intake = Intake(typed={"name": name, "legal_name": legal_name, "country": country, "summary": summary},
-                    ein=ein, website=website, access={"organization": access_org, "about": access_about})
-    if document and document.filename:
-        tmp = Path(tempfile.mkdtemp()) / document.filename
-        tmp.write_bytes(document.file.read())
-        intake.documents.append(DocumentInput(path=str(tmp), kind=kind, access=access))
+          ein: str = Form(""), website: str = Form("")):
+    typed = {k: v.strip() for k, v in {"name": name, "country": country, "registration_id": registration_id, "summary": summary}.items() if v.strip()}
+    intake = Intake(typed=typed, ein=ein, website=website, access={"organization": access_org, "about": access_about})
     job_id = str(uuid.uuid4())
     job = JOBS[job_id] = {"lines": [], "done": False, "error": "", "issues": [], "creator": get_creator_id()}
 
@@ -92,7 +81,7 @@ def start(name: str = Form(""), legal_name: str = Form(""), country: str = Form(
         try:
             bp = create_backpack(intake, creator=job["creator"], redraft=bool(redraft), log=job["lines"].append)
             job.update(issues=bp.issues, filename=f"{bp.title or 'backpack'}-backpack.zip", data=bp.to_bytes(), backpack_id=bp.id)
-        except Exception as e:          # a bug or an unreadable document; show it rather than hang
+        except Exception as e:          # a bug; show it rather than hang
             job["error"] = f"{type(e).__name__}: {e}"; job["lines"].append(job["error"])
         job["done"] = True
 

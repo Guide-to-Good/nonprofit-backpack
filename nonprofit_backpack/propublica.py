@@ -1,4 +1,4 @@
-"""IRS Form 990 lookup via ProPublica's Nonprofit Explorer API (free, no key). US organizations only.
+"""IRS record lookup via ProPublica's Nonprofit Explorer API (free, no key). US organizations only.
 
 Only an EIN the organization typed is looked up; materials are never scanned for one, since a
 number found in a report is too often a funder's or a fiscal sponsor's.
@@ -38,27 +38,16 @@ def lookup(ein: str) -> LookupResult | None:
 
 
 def map_response(data: dict, ein: str) -> LookupResult | None:
-    """ProPublica JSON -> prefills. Not-quite-one-to-one mappings carry a note rather than a guess."""
+    """ProPublica JSON -> prefills: the name (a fallback only), country and registration ID."""
     org = data.get("organization") or {}
     if not org.get("name"):
         return None
     digits = ein.replace("-", "")
     source = {"id": "propublica", "resource": PAGE.format(ein=digits),
-              "title": f"IRS Form 990 data for EIN {ein} via ProPublica Nonprofit Explorer"}
+              "title": f"IRS record for EIN {ein} via ProPublica Nonprofit Explorer"}
     fields: list[tuple[str, str, str]] = [
         ("name", org["name"], "IRS name on record; the everyday name may differ"),
-        ("legal_name", org["name"], "legal name on the IRS record"),
         ("country", "US", ""),
-        ("registration_scheme", "IRS-EIN", ""),
-        ("registration_id", ein, ""),
+        ("registration_id", ein, "the EIN"),
     ]
-    if org.get("ruling_date"):
-        fields.append(("year_founded", str(org["ruling_date"])[:4],
-                       "IRS ruling year, when tax-exempt status was granted, which is not always the founding year"))
-    filings = [f for f in data.get("filings_with_data") or [] if f.get("tax_prd")]
-    filings.sort(key=lambda f: f["tax_prd"], reverse=True)
-    if filings and filings[0].get("totfuncexpns") is not None:
-        prd = str(filings[0]["tax_prd"])
-        fields.append(("annual_budget", str(filings[0]["totfuncexpns"]),
-                       f"total expenses in USD from the Form 990 for the fiscal year ending {prd[:4]}-{prd[4:]}"))
     return LookupResult(name=org["name"], source=source, fields=fields)

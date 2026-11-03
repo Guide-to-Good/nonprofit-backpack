@@ -1,4 +1,4 @@
-"""One LLM call, via OpenRouter, to draft the summary, mission and vision from crawled pages.
+"""One LLM call, via OpenRouter, to draft the one-sentence summary and the tags from crawled pages.
 
 Env: OPENROUTER_API_KEY (required), OPENROUTER_MODEL (default below). The prompt is
 prompts/summary.md: neutral, no invented facts, footnote markers keyed to source ids.
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,17 +17,46 @@ DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 PROMPT = (Path(__file__).parent / "prompts" / "summary.md").read_text()
 MAX_INPUT_CHARS = 60_000
-FIELD_KEYS = ("name", "year_founded", "website", "staff_count", "country")
+FIELD_KEYS = ("name", "country")
+
+MAX_TAGS = 8
+MAX_TAG_WORDS = 4                     # longer than this is a phrase, not a tag
+REACH = ("local", "regional", "national", "international")
+# Spellings models reach for instead of the prompt's facet words. Folded so the same idea is one tag everywhere.
+TAG_ALIASES = {
+    "global": "international", "worldwide": "international", "multinational": "international", "transnational": "international",
+    "statewide": "regional", "countywide": "regional", "nationwide": "national", "community-based": "local", "grassroots": "local",
+    "direct-services": "direct-service", "service-delivery": "direct-service",
+    "grant-making": "grantmaking", "grantmaker": "grantmaking", "philanthropy": "grantmaking", "regranting": "grantmaking",
+    "policy-advocacy": "advocacy", "public-policy": "advocacy", "lobbying": "advocacy",
+    "community-organising": "community-organizing", "organizing": "community-organizing", "organising": "community-organizing",
+    "capacity-strengthening": "capacity-building", "technical-assistance": "capacity-building",
+    "volunteer-led": "volunteer-run", "all-volunteer": "volunteer-run", "volunteer-based": "volunteer-run",
+    "faith-based-organization": "faith-based", "religious": "faith-based", "church": "faith-based",
+    "private-foundation": "foundation", "community-foundation": "foundation", "fiscal-sponsorship": "fiscal-sponsor",
+    "membership-organization": "membership-association", "member-organization": "membership-association",
+    "food-insecurity": "food-security", "hunger-relief": "food-security", "anti-hunger": "food-security",
+    "wash": "clean-water", "water-sanitation-hygiene": "clean-water", "safe-water": "clean-water", "water-access": "clean-water",
+    "affordable-housing": "housing", "homelessness-prevention": "housing",
+    "healthcare": "public-health", "health-care": "public-health",
+    "kids": "children", "child": "children", "youth-development": "youth", "young-people": "youth",
+    "seniors": "older-adults", "elderly": "older-adults", "aging": "older-adults",
+    "asylum-seekers": "refugees", "displaced-people": "refugees", "military-veterans": "veterans",
+    "smallholder-farmers": "farmers", "agriculture": "farming", "animal-welfare": "animals",
+    "environment": "conservation", "environmental-conservation": "conservation",
+    "arts-and-culture": "arts", "culture": "arts", "families-with-children": "families", "low-income-families": "families",
+}
 
 
 @dataclass
 class Draft:
     texts: dict[str, str]
+    tags: list[str] = field(default_factory=list)
     fields: dict[str, str] = field(default_factory=dict)
     model: str = ""
 
 
-HEADINGS = r"\*{0,2}(?:SUMMARY|MISSION|VISION|FIELDS)(?::\*{0,2}|\*{0,2}:)"   # NAME:  **NAME:**  **NAME**:
+HEADINGS = r"\*{0,2}(?:SUMMARY|TAGS|FIELDS)(?::\*{0,2}|\*{0,2}:)"   # NAME:  **NAME:**  **NAME**:
 
 
 def _section(raw: str, name: str) -> str:
@@ -62,10 +92,12 @@ def clean_citations(text: str, citable: set[str], fallback: str, name: str = "")
 
 
 def normalize_statement(text: str, fallback: str, name: str = "") -> str:
-    """One consistent shape for mission and vision: no wrapping quotes, a capital first letter (unless it opens
-    with the organization's own name, kept as written), a final period, footnote(s) at the end."""
+    """One consistent shape for the summary: a single sentence (any after the first are dropped), no wrapping quotes,
+    a capital first letter (unless it opens with the organization's own name, kept as written), a final period,
+    footnote(s) at the end."""
     if not text.strip():
         return ""
+    text = _sentences(text, name)[0]
     notes = FOOTNOTE.findall(text) or ([fallback] if fallback else [])
     t = FOOTNOTE.sub("", text).strip().strip('"“”\'‘’').strip()
     t = re.sub(r"\s+", " ", t)
@@ -80,13 +112,31 @@ def normalize_statement(text: str, fallback: str, name: str = "") -> str:
     return t + "".join(f"[^{n}]" for n in dict.fromkeys(notes))
 
 
+def clean_tags(raw: list[str]) -> list[str]:
+    """The model's tags -> the tags stored in about.md. The prompt asks for 3-8 lowercase, hyphenated tags with no
+    place names, but nothing enforces that; this is the deterministic pass that does, as clean_citations does for
+    footnotes. Tags from different backpacks are only comparable if they come out of here in the same shape."""
+    out: list[str] = []
+    for t in raw:
+        t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode().lower().replace("&", " and ")
+        t = re.sub(r"[^a-z0-9]+", "-", t).strip("-")          # Direct Service, direct_service, #direct/service -> direct-service
+        t = TAG_ALIASES.get(t, t)
+        if not t or t.isdigit() or t.count("-") >= MAX_TAG_WORDS or t in out:
+            continue
+        if t in REACH and any(r in out for r in REACH):        # one reach only: the model's first word on it wins
+            continue
+        out.append(t)
+    return out[:MAX_TAGS]
+
+
 def parse(raw: str, model: str) -> Draft:
     fields = {}
     for line in _section(raw, "FIELDS").splitlines():
         m = re.match(rf"\s*({'|'.join(FIELD_KEYS)})\s*:\s*(.+?)\s*$", line)
         if m:
             fields[m.group(1)] = m.group(2)
-    return Draft(texts={k: _section(raw, k.upper()) for k in ("summary", "mission", "vision")}, fields=fields, model=model)
+    tags = [t.strip(" -*`") for t in re.split(r"[,\n]", _section(raw, "TAGS"))]
+    return Draft(texts={"summary": _section(raw, "SUMMARY")}, tags=[t for t in tags if t], fields=fields, model=model)
 
 
 def draft(material: list[dict], model: str | None = None) -> Draft:

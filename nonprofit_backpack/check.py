@@ -1,4 +1,4 @@
-"""Validate a backpack zip: OKF conformance, the backpack's own rules, completeness, hashes, confirmations."""
+"""Validate a backpack zip: OKF conformance, the backpack's own rules, completeness, confirmations."""
 from __future__ import annotations
 
 import re
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from .bundle import Backpack, Concept, RESERVED, sha256_hex, verification_status
+from .bundle import Concept, RESERVED, verification_status
 from .intake import ACCESS_VALUES, REQUIRED_FOR_COMPLETE
 from .countries import COUNTRY_CODES
 
@@ -20,7 +20,7 @@ class Finding:
 
 
 def _open(path: Path):
-    """(names, read) for a zip file or an unpacked directory holding backpack/ and files/."""
+    """(names, read) for a zip file or an unpacked directory holding backpack/."""
     if path.is_dir():
         names = [str(p.relative_to(path)) for p in path.rglob("*") if p.is_file()]
         return names, lambda n: (path / n).read_bytes()
@@ -57,7 +57,6 @@ def check(path: str | Path) -> list[Finding]:
                 err(f"index.md should declare okf_version \"0.2\", found {ver!r}")
         if "backpack/log.md" not in names:
             warn("backpack/log.md is missing")
-        files = {n: read(n) for n in names if n.startswith("files/") and not n.endswith("/")}
 
     by_path = {c.path: c for c in concepts}
     org, about = by_path.get("organization.md"), by_path.get("about.md")
@@ -68,7 +67,7 @@ def check(path: str | Path) -> list[Finding]:
 
     # Backpack rules
     fm = org.frontmatter
-    for k in ("id", "type", "title", "legal_name", "access", "generated"):
+    for k in ("id", "type", "title", "access", "generated"):
         if not fm.get(k):
             err(f"organization.md: `{k}` is required")
     if fm.get("type") != "Organization":
@@ -82,6 +81,9 @@ def check(path: str | Path) -> list[Finding]:
         warn(f"organization.md: registration.country {reg['country']!r} is not an ISO 3166-1 alpha-2 code")
     if about and about.frontmatter.get("organization") != "./organization.md":
         err("about.md: `organization` must be ./organization.md")
+    tags = about.frontmatter.get("tags") if about else None
+    if tags is not None and not (isinstance(tags, list) and all(isinstance(t, str) and t.strip() for t in tags)):
+        err("about.md: `tags` must be a list of non-empty strings")
 
     for c in concepts:
         a = c.frontmatter.get("access")
@@ -92,28 +94,15 @@ def check(path: str | Path) -> list[Finding]:
         for label in set(re.findall(r"\[\^([\w-]+)\]", c.body)):
             if label not in ids:
                 err(f"{c.path}: footnote [^{label}] has no matching sources[].id")
-        # document hashes
-        if c.path.startswith("documents/"):
-            res, digest = str(c.frontmatter.get("resource", "")), str(c.frontmatter.get("sha256", ""))
-            if not re.fullmatch(r"[0-9a-f]{64}", digest):
-                err(f"{c.path}: sha256 is missing or not 64 hex chars")
-            elif res.startswith("../../files/"):
-                data = files.get("files/" + res[len("../../files/"):])
-                if data is None:
-                    err(f"{c.path}: resource {res} is not in the zip")
-                elif sha256_hex(data) != digest:
-                    err(f"{c.path}: sha256 does not match {res}")
-            else:
-                info(f"{c.path}: resource is external ({res}); hash not checked")
         status = verification_status(c)
         (warn if status == "lapsed" else info)(f"{c.path}: {status}" + (" (content changed after confirmation)" if status == "lapsed" else ""))
 
     # completeness
-    have = {"name": fm.get("title", ""), "legal_name": fm.get("legal_name", ""), "country": reg.get("country", ""),
+    have = {"name": fm.get("title", ""), "country": reg.get("country", ""),
             "summary": "# Summary" in (about.body if about else "")}
     missing = [k for k in REQUIRED_FOR_COMPLETE if not have.get(k)]
     if missing:
         warn("valid but incomplete: missing " + ", ".join(missing))
     else:
-        info("complete: name, legal name, country and summary are present")
+        info("complete: name, country and summary are present")
     return out

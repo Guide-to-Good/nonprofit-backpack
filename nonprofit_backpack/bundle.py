@@ -1,8 +1,7 @@
 """Build, read, write and confirm a backpack.
 
 Bundle shape (OKF v0.2):
-  backpack/index.md, log.md, organization.md, about.md, documents/index.md, documents/<slug>.md
-  files/<original files>   (sidecar, outside the OKF tree, when LocalStorage is used)
+  backpack/index.md, log.md, organization.md, about.md
 """
 from __future__ import annotations
 
@@ -14,12 +13,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 import yaml
 
 from .identity import new_backpack_id
-from .intake import DocumentInput, Origin, Resolved, FIELDS, TEXTS
-from .storage import Storage, LocalStorage
+from .intake import Origin, Resolved, FIELDS, TEXTS
 
 RESERVED = ("index.md", "log.md")
 
@@ -30,10 +27,6 @@ def now_iso() -> str:
 
 def sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def slugify(s: str) -> str:
-    return re.sub(r"^-|-$", "", re.sub(r"[^a-z0-9]+", "-", s.lower())) or "document"
 
 
 # ---- concepts ------------------------------------------------------------------------------------
@@ -75,7 +68,6 @@ def canonical_hash(frontmatter: dict, body: str) -> str:
 @dataclass
 class Backpack:
     concepts: list[Concept] = field(default_factory=list)
-    files: dict[str, bytes] = field(default_factory=dict)      # files/<name> sidecar contents
     log: list[str] = field(default_factory=list)               # log.md lines under today's date, newest first
     title: str = ""
     issues: list[str] = field(default_factory=list)            # funnel steps that did not succeed (not written to the bundle)
@@ -87,9 +79,6 @@ class Backpack:
     def concept(self, path: str) -> Concept:
         return next(c for c in self.concepts if c.path == path)
 
-    def documents(self) -> list[Concept]:
-        return [c for c in self.concepts if c.path.startswith("documents/")]
-
     def write(self, path: str | Path) -> None:
         Path(path).write_bytes(self.to_bytes())
 
@@ -99,10 +88,7 @@ class Backpack:
             for c in self.concepts:
                 z.writestr(f"backpack/{c.path}", c.render())
             z.writestr("backpack/index.md", self._index())
-            z.writestr("backpack/documents/index.md", self._documents_index())
             z.writestr("backpack/log.md", self._log())
-            for name, data in self.files.items():
-                z.writestr(name, data)
         return buf.getvalue()
 
     @classmethod
@@ -112,8 +98,6 @@ class Backpack:
             for name in z.namelist():
                 if name.startswith("backpack/") and name.endswith(".md") and Path(name).name not in RESERVED:
                     bp.concepts.append(Concept.parse(name[len("backpack/"):], z.read(name).decode("utf-8")))
-                elif name.startswith("files/") and not name.endswith("/"):
-                    bp.files[name] = z.read(name)
             bp._old_log = z.read("backpack/log.md").decode("utf-8") if "backpack/log.md" in z.namelist() else ""
         bp.title = str(bp.concept("organization.md").frontmatter.get("title", ""))
         return bp
@@ -122,14 +106,8 @@ class Backpack:
 
     def _index(self) -> str:
         return (f'---\nokf_version: "0.2"\n---\n\n# Nonprofit Backpack: {self.title}\n\n'
-                f"* [{self.title}](organization.md) - Organization: registration and headline facts\n"
-                f"* [About](about.md) - About: summary, mission and vision\n"
-                f"* [Documents](documents/) - {len(self.documents())} document(s)\n")
-
-    def _documents_index(self) -> str:
-        rows = [f"* [{c.frontmatter.get('title')}]({Path(c.path).name}) - {c.frontmatter.get('kind', '')}"
-                + (f", {c.frontmatter['period']}" if c.frontmatter.get("period") else "") for c in self.documents()]
-        return "# Documents\n\n" + ("\n".join(rows) if rows else "No documents.") + "\n"
+                f"* [{self.title}](organization.md) - Organization: name and registration\n"
+                f"* [About](about.md) - About: summary and tags\n")
 
     def _log(self) -> str:
         today = now_iso()[:10]
@@ -149,49 +127,33 @@ def _footnotes(sources: list[dict], ids: set[str]) -> str:
     return "\n".join(f"[^{s['id']}]: {s.get('title') or s['resource']}" for s in sources if s["id"] in ids)
 
 
-def _num(v: str):
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return v
-
-
 def _generated(r: Resolved, keys: list[str], tool: str, at: str) -> dict:
     """`generated.by` is always the creator who ran the tool, so every file names the person. When any present
     value was fetched or drafted, `generated.tool` records the tool version (and model) that supplied it; the
     body's Provenance section says which values."""
-    present = [k for k in keys if k != "website" and (r.values.get(k) or r.texts.get(k) or "").strip()]
+    present = [k for k in keys if (r.values.get(k) or r.texts.get(k) or "").strip() or (k == "tags" and r.tags)]
     g = {"by": r.creator, "at": at}  # type: ignore[attr-defined]
     if any(r.origin[k].by != "human" for k in present):
         g["tool"] = tool + (f"+{r.llm_model}" if any(r.origin[k].by == "llm" for k in present) and r.llm_model else "")
     return g
 
 
-def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, log=lambda m: None) -> Backpack:
+def build(resolved: Resolved, creator: str, *, log=lambda m: None) -> Backpack:
     from . import TOOL, VERSION
     r, tool, at = resolved, f"{TOOL}/{VERSION}", now_iso()
     r.creator = creator  # type: ignore[attr-defined]
-    storage = storage or LocalStorage()
     v = r.values
     if not r.id:
         r.id = new_backpack_id()
     bp = Backpack(title=v.get("name", ""))
 
     # organization.md
-    fm: dict = {"id": r.id, "type": "Organization", "title": v.get("name", ""), "legal_name": v.get("legal_name", ""),
+    fm: dict = {"id": r.id, "type": "Organization", "title": v.get("name", ""),
                 "access": r.access.get("organization", "public"),
                 "generated": _generated(r, [k for k, _ in FIELDS], tool, at)}
-    reg = {k2: v[k1] for k1, k2 in (("country", "country"), ("registration_scheme", "scheme"), ("registration_id", "id")) if v.get(k1)}
+    reg = {k2: v[k1] for k1, k2 in (("country", "country"), ("registration_id", "id")) if v.get(k1)}
     if reg:
         fm["registration"] = reg
-    for k in ("year_founded", "annual_budget", "staff_count"):
-        if v.get(k):
-            fm[k] = _num(v[k])
-    if v.get("website"):
-        fm["website"] = v["website"]
     if r.sources:
         fm["sources"] = r.sources
     used, lines = set(), []
@@ -200,7 +162,7 @@ def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, l
         if o and o.source and v.get(k, "").strip():
             used.add(o.source)
             lines.append(f"- `{k}`" + (f": {o.note}" if o.note else "") + f"[^{o.source}]")
-    human = [k for k, _ in FIELDS if k != "website" and r.origin.get(k, Origin("")).by == "human" and v.get(k, "").strip()]
+    human = [k for k, _ in FIELDS if r.origin.get(k, Origin("")).by == "human" and v.get(k, "").strip()]
     if lines and human:
         lines.append("- typed by the organization: " + ", ".join(f"`{k}`" for k in human))
     body = ("# Provenance\n\n" + "\n".join(lines) + "\n\n" + _footnotes(r.sources, used) + "\n") if lines \
@@ -210,7 +172,9 @@ def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, l
     # about.md
     fm = {"type": "About", "title": f"About {v.get('name', '')}", "organization": "./organization.md",
           "access": r.access.get("about", "public"),
-          "generated": _generated(r, [k for k, _ in TEXTS], tool, at)}
+          "generated": _generated(r, [k for k, _ in TEXTS] + ["tags"], tool, at)}
+    if r.tags:
+        fm["tags"] = r.tags
     if r.sources:
         fm["sources"] = r.sources
     sections = [f"# {k.capitalize()}\n\n{r.texts[k].strip()}" for k, _ in TEXTS if r.texts.get(k, "").strip()]
@@ -219,53 +183,9 @@ def build(resolved: Resolved, creator: str, storage: Storage | None = None, *, l
     defs = _footnotes(r.sources, used)
     bp.concepts.append(Concept("about.md", fm, text + ("\n\n" + defs if defs else "") + "\n"))
 
-    # documents
-    for d in r.documents:
-        _add_document_concept(bp, d, creator, storage, at, log)
-    bp.files.update(storage.collect())
     bp.log.append(f"**Creation**: created by {creator} with {tool} at {at}.")
-    log(f"Built backpack {r.id} with {len(bp.documents())} document(s).")
+    log(f"Built backpack {r.id}.")
     return bp
-
-
-def _add_document_concept(bp: Backpack, d: DocumentInput, creator: str, storage: Storage, at: str, log) -> Concept:
-    if d.path:
-        data = Path(d.path).read_bytes()
-        filename = Path(d.path).name
-    elif d.url:
-        if d.sha256:
-            data, filename = b"", Path(d.url).name or "document"
-        else:
-            log(f"Fetching {d.url} to hash it…")
-            resp = httpx.get(d.url, follow_redirects=True, timeout=60.0)
-            resp.raise_for_status()
-            data, filename = resp.content, Path(d.url).name or "document"
-    else:
-        raise ValueError("a document needs a path or a url")
-    digest = d.sha256 or sha256_hex(data)
-    resource = d.url if d.url else storage.put(data, filename, d.access)
-    title = d.title or Path(filename).stem
-    slug = slugify(Path(filename).stem)
-    while any(c.path == f"documents/{slug}.md" for c in bp.concepts):
-        slug += "-2"
-    fm = {"type": "Document", "title": title, "kind": d.kind, "resource": resource, "sha256": digest,
-          "access": d.access, "generated": {"by": creator, "at": at}}
-    if d.period:
-        fm["period"] = d.period
-    c = Concept(f"documents/{slug}.md", fm, "Provided by the organization. Not parsed; the hash is of the file bytes.\n")
-    bp.concepts.append(c)
-    return c
-
-
-def add_document(bp: Backpack, d: DocumentInput, creator: str, storage: Storage | None = None, *, log=lambda m: None) -> Concept:
-    """Add a document to an existing backpack: hash, store, write the concept, log it."""
-    storage = storage or LocalStorage()
-    if isinstance(storage, LocalStorage):
-        storage.files = {Path(k).name: v for k, v in bp.files.items()}
-    c = _add_document_concept(bp, d, creator, storage, now_iso(), log)
-    bp.files.update(storage.collect())
-    bp.log.append(f"**Update**: added document [{c.frontmatter['title']}]({c.path}).")
-    return c
 
 
 # ---- confirmation --------------------------------------------------------------------------------

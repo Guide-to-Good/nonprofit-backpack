@@ -1,4 +1,4 @@
-"""The intake funnel: typed essentials first, then EIN, then website, then documents.
+"""The intake funnel: typed essentials first, then EIN, then website.
 
 Precedence is fixed: typed beats fetched, fetched beats drafted. Each resolved value keeps the
 origin of whichever source won, which is what the provenance footnotes are written from.
@@ -18,32 +18,14 @@ ACCESS_VALUES = ("public", "private")
 # The organization fields, in display order. `label` is what a prompt or form shows.
 FIELDS: list[tuple[str, str]] = [
     ("name", "Organization name"),
-    ("legal_name", "Organization legal name"),
     ("country", "Country (ISO 3166-1 code, e.g. US, KE)"),
-    ("registration_scheme", "Registration scheme (code from `nbp schemes`, or free text)"),
     ("registration_id", "Nonprofit registration ID"),
-    ("year_founded", "Year founded"),
-    ("annual_budget", "Annual budget (total annual expenses, a number)"),
-    ("staff_count", "Staff number"),
-    ("website", "Website"),
 ]
 TEXTS: list[tuple[str, str]] = [
-    ("summary", "Summary (2-3 sentences: who you are and what you do)"),
-    ("mission", "Mission statement"),
-    ("vision", "Vision statement"),
+    ("summary", "Summary (one sentence: who you are and what you do)"),
 ]
-REQUIRED_FOR_COMPLETE = ("name", "legal_name", "country", "summary")
-
-
-@dataclass
-class DocumentInput:
-    path: str = ""          # local file, or
-    url: str = ""           # a link to a document hosted elsewhere
-    sha256: str = ""        # optional for links: supply it if you have it, else it is fetched and hashed
-    title: str = ""
-    kind: str = ""          # free text: audit, registration certificate, annual report...
-    period: str = ""
-    access: Access = "private"
+REQUIRED_FOR_COMPLETE = ("name", "country", "summary")
+INTAKE_KEYS = ("ein", "website", "crawl", "access", "id")   # facts-file keys that steer the funnel rather than being stored
 
 
 @dataclass
@@ -53,19 +35,19 @@ class Intake:
     ein: str = ""
     website: str = ""
     crawl: bool = True                                     # crawl `website` when set
-    documents: list[DocumentInput] = field(default_factory=list)
     access: dict[str, Access] = field(default_factory=lambda: {"organization": "public", "about": "public"})
     id: str = ""                                           # the backpack's organization UUID, kept across runs
+    ignored: list[str] = field(default_factory=list)       # facts-file keys this version does not record (reported, not stored)
 
     @classmethod
     def from_file(cls, path: str | Path) -> "Intake":
         data = yaml.safe_load(Path(path).read_text()) or {}
         typed = {k: str(data[k]).strip() for k, _ in FIELDS + TEXTS if data.get(k) not in (None, "")}
-        docs = [DocumentInput(**{k: str(v) for k, v in d.items()}) for d in data.get("documents", [])]
         access = {"organization": "public", "about": "public", **(data.get("access") or {})}
-        website = typed.get("website", "")
-        return cls(typed=typed, ein=str(data.get("ein", "") or ""), website=website,
-                   crawl=bool(data.get("crawl", True)), documents=docs, access=access, id=str(data.get("id", "") or ""))
+        known = {k for k, _ in FIELDS + TEXTS} | set(INTAKE_KEYS)
+        return cls(typed=typed, ein=str(data.get("ein", "") or ""), website=str(data.get("website", "") or ""),
+                   crawl=bool(data.get("crawl", True)), access=access, id=str(data.get("id", "") or ""),
+                   ignored=[k for k in data if k not in known])
 
 
 @dataclass
@@ -79,12 +61,13 @@ class Origin:
 class Resolved:
     values: dict[str, str] = field(default_factory=dict)        # field name -> value
     origin: dict[str, Origin] = field(default_factory=dict)     # field or text name -> origin
-    texts: dict[str, str] = field(default_factory=dict)         # summary / mission / vision
+    texts: dict[str, str] = field(default_factory=dict)         # summary
+    tags: list[str] = field(default_factory=list)               # always drafted by the LLM, never typed
     sources: list[dict] = field(default_factory=list)           # OKF sources entries
     pages: list = field(default_factory=list)                   # crawled pages, for the record
     llm_model: str = ""                                         # set when the LLM drafted anything
     issues: list[str] = field(default_factory=list)             # steps that did not succeed, in plain words
-    documents: list[DocumentInput] = field(default_factory=list)
+    website: str = ""                                           # crawled, recorded as a source, not stored as a field
     access: dict[str, Access] = field(default_factory=dict)
     id: str = ""
 
@@ -102,24 +85,25 @@ def resolve(intake: Intake, *, fetch: bool = True, redraft: bool = False, log: C
             lookup_ein: Callable | None = None, crawl_site: Callable | None = None, draft: Callable | None = None) -> Resolved:
     """Run the funnel. The three fetchers can be injected (for tests, examples, or your own sources).
 
-    Drafting sees everything: the typed statements, the IRS facts and the crawled pages. By default it only
-    writes the statements that are still empty (typed beats drafted). With `redraft=True` it rewrites the typed
-    ones too, using all of it, and provenance records that the LLM did.
+    Drafting needs crawled pages, and sees everything: the typed summary, the IRS facts (context only) and the
+    pages. It writes the summary only if it is still empty (typed beats drafted), unless `redraft=True`, and it
+    always writes the tags, which come from the LLM alone.
     """
     from . import propublica, scrape, draft as drafting
 
     def fail(msg: str):
         r.issues.append(msg); log(msg)
 
-    r = Resolved(documents=list(intake.documents), access=dict(intake.access), id=intake.id)
+    r = Resolved(access=dict(intake.access), id=intake.id)
+    ignored = intake.ignored + [k for k in intake.typed if k not in {k2 for k2, _ in FIELDS + TEXTS} and k not in intake.ignored]
+    if ignored:   # e.g. legal_name, mission or documents from a pre-0.2 facts file: say so rather than drop them quietly
+        fail("Ignored fields this version does not record: " + ", ".join(ignored) + ".")
     for k, _ in FIELDS:
         if intake.typed.get(k, "").strip():
             r.values[k] = intake.typed[k].strip(); r.origin[k] = Origin("human")
     for k, _ in TEXTS:
         if intake.typed.get(k, "").strip():
             r.texts[k] = intake.typed[k].strip(); r.origin[k] = Origin("human")
-    if "website" in r.values:
-        r.values["website"] = normalize_url(r.values["website"])
 
     def fill(k: str, value, origin: Origin, store: dict):
         if value in (None, "") or store.get(k, "").strip():
@@ -147,9 +131,7 @@ def resolve(intake: Intake, *, fetch: bool = True, redraft: bool = False, log: C
         else:
             fail("No IRS record for that EIN.")
 
-    website = normalize_url(intake.website) or r.values.get("website", "")
-    if website:
-        fill("website", website, Origin("human"), r.values)
+    website = r.website = normalize_url(intake.website)
     if website and intake.crawl and fetch:
         log(f"Crawling {website} (up to {scrape.MAX_PAGES} pages)…")
         try:
@@ -162,33 +144,34 @@ def resolve(intake: Intake, *, fetch: bool = True, redraft: bool = False, log: C
 
     typed_texts = {k: r.texts[k] for k, _ in TEXTS if r.origin.get(k, Origin("")).by == "human" and r.texts.get(k, "").strip()}
     want = [k for k, _ in TEXTS if redraft or not r.texts.get(k, "").strip()]
-    if (r.pages or ein_facts(r)) and want and fetch:
+    if r.pages and fetch:   # the IRS record alone (name, country, ID) is too little to describe an organization from
         if draft or os.environ.get("OPENROUTER_API_KEY"):
             material = draft_material(r, typed_texts)
-            log(("Redrafting " if redraft else "Drafting ") + ", ".join(want) + " with the LLM from " +
+            log(("Redrafting " if redraft else "Drafting ") + ", ".join(want + ["tags"]) + " with the LLM from " +
                 ", ".join(sorted({m["id"] for m in material})) + "…")
             try:
                 d = (draft or drafting.draft)(material)
                 r.llm_model = d.model
-                citable = {m["id"] for m in material if m["id"] != "propublica" or not r.pages}
-                fallback = "website" if r.pages else ("propublica" if "propublica" in citable else "")
+                citable = {m["id"] for m in material if m["id"] != "propublica"}
                 org_name = r.values.get("name") or d.fields.get("name", "")
                 for k in want:
-                    text = drafting.clean_citations(d.texts.get(k, ""), citable, fallback, org_name)
-                    if k in ("mission", "vision"):
-                        text = drafting.normalize_statement(text, fallback, org_name)
+                    text = drafting.clean_citations(d.texts.get(k, ""), citable, "website", org_name)
+                    text = drafting.normalize_statement(text, "website", org_name)
                     if not text:
                         continue
-                    if k in typed_texts:   # redraft: the typed statement becomes a cited source of the new one
+                    if k in typed_texts:   # redraft: the typed summary becomes a cited source of the new one
                         _add_source(r, "organization", "statements typed by the organization at intake", "Statements typed by the organization")
-                    r.texts[k] = text; r.origin[k] = Origin("llm", fallback)
+                    r.texts[k] = text; r.origin[k] = Origin("llm", "website")
+                r.tags = drafting.clean_tags(d.tags)
+                if r.tags:
+                    r.origin["tags"] = Origin("llm", "website")
                 notes = {"name": "the name the organization uses on its website"}
                 for k, value in d.fields.items():
                     fill(k, value, Origin("llm", "website", notes.get(k, "suggested by the LLM from the website text")), r.values)
             except Exception as e:
                 fail(f"Drafting failed: {e}")
         else:
-            fail("OPENROUTER_API_KEY not set; skipped drafting. Summary, mission and vision stay as typed.")
+            fail("OPENROUTER_API_KEY not set; skipped drafting. The summary stays as typed, and there are no tags.")
     if irs_name:   # nothing typed or found on the site: fall back to the IRS name, with its caveat
         fill("name", irs_name[0], irs_name[1], r.values)
     return r
@@ -202,16 +185,14 @@ def ein_facts(r: Resolved) -> str:
 
 
 def draft_material(r: Resolved, typed_texts: dict[str, str]) -> list[dict]:
-    """Everything the LLM sees: typed statements (authoritative), IRS facts, crawled pages. Each tagged with a source id."""
+    """Everything the LLM sees: the typed summary (authoritative), IRS facts (context only), crawled pages. Each tagged with a source id."""
     material = []
     if typed_texts:
-        material.append({"id": "organization", "title": "Statements typed by the organization (authoritative; keep their meaning)",
+        material.append({"id": "organization", "title": "Summary typed by the organization (authoritative; keep its meaning)",
                          "text": "\n\n".join(f"{k.upper()}: {v}" for k, v in typed_texts.items())})
     facts = ein_facts(r)
     if facts:
-        title = ("IRS facts via ProPublica (context only: do not cite, and do not restate its years or figures)" if r.pages
-                 else "IRS Form 990 facts via ProPublica")
-        material.append({"id": "propublica", "title": title, "text": facts})
+        material.append({"id": "propublica", "title": "IRS facts via ProPublica (context only: do not cite)", "text": facts})
     material += [{"id": "website", "title": p.title or p.url, "text": p.text} for p in r.pages]
     return material
 

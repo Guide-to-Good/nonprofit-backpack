@@ -1,6 +1,6 @@
 # Nonprofit Backpack
 
-A **Nonprofit Backpack** is a small, portable bundle of facts about a nonprofit: who it is, where it is registered, its headline numbers, a short description, and hashes of the documents that back those up. It is an [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundle, markdown files with YAML frontmatter, and it records where every value came from and who confirmed it.
+A **Nonprofit Backpack** is a small, portable bundle of facts about a nonprofit: its name, where it is registered, a one-sentence description, and tags that say what kind of organization it is. It is an [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) bundle, markdown files with YAML frontmatter, and it records where every value came from and who confirmed it.
 
 This repo is the piping to make one: a Python library and a command, `nbp`. Facts go in; a validated zip comes out. This repo is envisioned as a minimal, MIT-licensed digital public good. 
 
@@ -13,15 +13,13 @@ The repo includes the following tooling:
 
 `nbp create` generates a creator ID (a UUID) for the user to keep. It is written into every file as the author and is how confirmations are attributed. It identifies the creator but does not prove identity; nothing is cryptographically signed.
 
-Each document is recorded by its SHA-256 hash. By default the file travels inside the zip in `files/`; a storage adapter can keep it in another system instead, leaving the hash and a link as the pointer.
-
 ## Install
 
 ```
 git clone https://github.com/Guide-to-Good/nonprofit-backpack && cd nonprofit-backpack
 python -m venv .venv && source .venv/bin/activate
 pip install -e . && playwright install chromium
-export OPENROUTER_API_KEY=sk-or-...      # optional: enables drafting of summary, mission, vision
+export OPENROUTER_API_KEY=sk-or-...      # optional: enables drafting of the summary and tags
 ```
 
 ## User types and use cases
@@ -29,10 +27,10 @@ export OPENROUTER_API_KEY=sk-or-...      # optional: enables drafting of summary
 | Audience | Use case | Entry point |
 |---|---|---|
 | **Nonprofit staff** (an ED, or someone helping one) | Make a backpack for their own organization, answering questions | `nbp create` |
-| **Nonprofit staff** | Add a new audit or report later; review and sign off on what was drafted | `nbp add-doc`, `nbp confirm` |
+| **Nonprofit staff** | Review and sign off on what was drafted | `nbp confirm` |
 | **Platform or data teams** (CRMs, grants portals, TechSoup-style registries) | Export facts they already hold, one file per organization, and generate backpacks in bulk | `nbp create facts.yaml` |
 | **Developers and scripters** | Try a lookup quickly, or run from cron, CI or a Makefile | `nbp create --ein … --url … -y` |
-| **Product developers at member orgs** | Fold backpack creation into their own app, with their users, storage and registries | Python API, `examples/integrate_fastapi.py` |
+| **Product developers at member orgs** | Fold backpack creation into their own app, with their users and registries | Python API, `examples/integrate_fastapi.py` |
 | **Funders, platforms, verifiers** | Check a backpack they received is valid, complete and still confirmed | `nbp check` |
 | **Working-group demos** | Show the flow end to end, in a terminal or a bare web form | `docs/DEMO.md`, the FastAPI example |
 
@@ -42,12 +40,11 @@ export OPENROUTER_API_KEY=sk-or-...      # optional: enables drafting of summary
 nbp create
 ```
 
-Four prompts, Enter skips any: essentials, EIN, website, documents. Then who may read each file (`public` or `private`), then where to save the zip (default `~/Downloads`). It prints each step as it runs, lists any step that failed, and ends with your creator ID to keep.
+Three prompts, Enter skips any: essentials (name, country, registration ID, summary), EIN, website. Then who may read each file (`public` or `private`), then where to save the zip (default `~/Downloads`). It prints each step as it runs, lists any step that failed, and ends with your creator ID to keep.
 
 Later:
 
 ```
-nbp add-doc ~/Downloads/my-backpack.zip audit.pdf --kind audit --period FY2025 --access private
 nbp confirm ~/Downloads/my-backpack.zip                      # sign off on every file
 nbp confirm ~/Downloads/my-backpack.zip --concept about.md   # or just one
 ```
@@ -59,14 +56,12 @@ Another system writes one YAML file per organization; `nbp` turns each into a ba
 ```yaml
 # riverbend.yaml
 name: Riverbend Food Pantry
-legal_name: Riverbend Food Pantry Inc
 country: US
+registration_id: 12-3456789
 summary: Riverbend Food Pantry distributes groceries to households in Riverbend County, Ohio.
-ein: 12-3456789                # optional: fills what is still empty from the IRS record
-website: riverbendpantry.example.org   # optional: crawled, used for drafting
+ein: 12-3456789                # optional: fills country and registration ID if still empty
+website: riverbendpantry.example.org   # optional: crawled, used for drafting the summary and tags
 access: { organization: public, about: public }
-documents:
-  - { path: audit.pdf, kind: audit, period: FY2025, access: private }
 ```
 
 ```
@@ -74,7 +69,7 @@ nbp create riverbend.yaml -o out/riverbend.zip
 for f in exports/*.yaml; do nbp create "$f" -y -o "out/$(basename "$f" .yaml).zip"; done
 ```
 
-All fields: `name`, `legal_name`, `country`, `registration_scheme` (`nbp schemes` lists codes), `registration_id`, `year_founded`, `annual_budget`, `staff_count`, `website`, `summary`, `mission`, `vision`, `ein`, `crawl`, `access`, `documents`, `id`. Examples: `examples/facts-us.yaml`, `examples/facts-ke.yaml`.
+All fields: `name`, `country`, `registration_id`, `summary`, `ein`, `website`, `crawl`, `access`, `id`. Tags cannot be typed; only the LLM writes them. Any other key, such as `legal_name` or `documents` from a pre-0.2 file, is left out and listed under *Steps that did not succeed*. Examples: `examples/facts-us.yaml`, `examples/facts-ke.yaml`.
 
 ### Developers and scripters: flags
 
@@ -85,11 +80,11 @@ nbp create --ein 36-3673599 --url feedingamerica.org -y                       # 
 
 | Option | Effect |
 |---|---|
-| `--ein`, `--url`, `--doc` (repeatable) | Inputs, as in the funnel |
+| `--ein`, `--url` | Inputs, as in the funnel |
 | `-o PATH` | Output zip; default `~/Downloads/<name>-backpack.zip` |
-| `-y` | No prompts: public for organization and about, private for documents |
+| `-y` | No prompts: public for organization and about |
 | `--confirm` | Self-confirm every file at creation |
-| `--redraft` | Let the LLM rewrite typed statements using everything found |
+| `--redraft` | Let the LLM rewrite a typed summary using everything found |
 | `--no-fetch` | Skip lookup, crawl and drafting |
 | `--creator human:<uuid>` | Use a given creator ID instead of the saved one |
 | `-i` | Interactive, even with flags |
@@ -97,21 +92,19 @@ nbp create --ein 36-3673599 --url feedingamerica.org -y                       # 
 ### Product developers: the Python API
 
 ```python
-from nonprofit_backpack import Intake, DocumentInput, create_backpack
+from nonprofit_backpack import Intake, create_backpack
 
 intake = Intake(typed={"name": "Riverbend Food Pantry", "country": "US", "summary": "..."},
                 ein="12-3456789", website="riverbendpantry.example.org",
-                documents=[DocumentInput(path="audit.pdf", kind="audit", access="private")],
                 access={"organization": "public", "about": "public"})
-bp = create_backpack(intake, creator=f"human:{user.id}", storage=my_storage, log=progress.append)
+bp = create_backpack(intake, creator=f"human:{user.id}", log=progress.append)
 bp.issues          # steps that did not succeed, to show the user
 bp.to_bytes()      # the zip, for an HTTP response; or bp.write(path)
 ```
 
-Three sockets for developer customization:
+Two sockets for developer customization:
 
 - **Identity**: pass `creator=` with your user's ID.
-- **Storage**: implement `Storage.put(data, filename, access) -> resource` to keep documents in your store and enforce `access` there. `examples/storage_s3.py` is one.
 - **Fetchers**: call `resolve(intake, lookup_ein=…, crawl_site=…, draft=…)` to swap in your own registry lookup (say, a UK Charity Commission client), scraper or model. `examples/make_examples.py` does this with stubs.
 
 `examples/integrate_fastapi.py` shows it behind a web form with a live progress log. Run the crawl in a worker thread, not an `async` handler: the browser API it uses cannot run inside an event loop.
@@ -122,7 +115,7 @@ Three sockets for developer customization:
 nbp check riverbend.zip              # or an unpacked directory
 ```
 
-Reports errors, warnings and notes: OKF conformance, required keys, a UUID v4 `id`, `access` values, footnotes that resolve to `sources`, document hashes against the files, each file's confirmation status (confirmed, lapsed, unconfirmed), and completeness. Exits non-zero on errors, so it works in CI.
+Reports errors, warnings and notes: OKF conformance, required keys, a UUID v4 `id`, `access` values, footnotes that resolve to `sources`, `tags` as a list of strings, each file's confirmation status (confirmed, lapsed, unconfirmed), and completeness. Exits non-zero on errors, so it works in CI.
 
 ### Demos
 
@@ -138,27 +131,37 @@ python examples/make_examples.py                                     # regenerat
 The organization is asked for the essentials first. Each later step is optional and only fills what is still empty.
 
 1. **Typed values** are recorded as the organization's own.
-2. **EIN** (US only): one call to ProPublica's Nonprofit Explorer API, which returns the IRS record and figures ProPublica already extracted from e-filed Form 990s. We do not fetch the 990 itself. Six values fill empty fields: legal name, country, scheme, registration ID, year founded (the IRS ruling year, with a caveat) and annual budget (total expenses from the latest filing). The IRS name is used as the organization name only as a last resort, since it is usually the legal form ("Givedirectly Inc"); the everyday name comes from what was typed or from the website.
+2. **EIN** (US only): one call to ProPublica's Nonprofit Explorer API for the IRS record. It fills country (`US`) and registration ID (the EIN) if they are still empty. The IRS name is used as the organization name only as a last resort, since it is usually the legal form ("Givedirectly Inc"); the everyday name comes from what was typed or from the website.
 3. **Website**: headless Chromium renders up to 10 same-domain pages, about, team and mission pages first, and extracts their text. The text is held in memory only, never stored in the backpack; the bundle records the site as a source.
-4. **Drafting**, once, if a key is set and there is something to write: the LLM receives the typed statements (marked authoritative), the IRS values with their caveats, and the page text. It writes only the summary, mission or vision that are still empty, unless `--redraft`, and suggests the everyday name and other empty fields. When there are website pages, the IRS values are context only: they cannot be cited, and their years and figures stay in `organization.md`. Two deterministic passes follow. Any footnote naming a source the model was not allowed to cite is removed, so every sentence is attributed to a source it actually had. Mission and vision are normalized to one shape: a single sentence, no quotation marks, a final period, a footnote. It never sees documents.
-5. **Documents** are hashed with SHA-256 and stored. They are never parsed.
-6. **Build** writes the files with provenance, then **check** validates them.
+4. **Drafting**, once, if a key is set and the website was crawled: the LLM receives the typed summary (marked authoritative), the IRS values (context only, never cited) and the page text. It writes the summary only if it is still empty, unless `--redraft`, and always writes the tags. It may also suggest the everyday name and the country if they are still empty. Deterministic passes follow. Any footnote naming a source the model was not allowed to cite is removed, so the summary is attributed to a source it actually had. The summary is cut to its first sentence and put in one shape: no quotation marks, a final period, a footnote. The tags are normalized by `clean_tags()` in `draft.py`.
+5. **Build** writes the files with provenance, then **check** validates them.
 
-**Precedence is fixed: typed beats fetched, fetched beats drafted.** Every value keeps the origin of whichever source won. Nothing is required for a *valid* backpack; a *complete* one has name, legal name, country and summary.
+**Precedence is fixed: typed beats fetched, fetched beats drafted.** Tags are the exception: only the LLM writes them. Every value keeps the origin of whichever source won. Nothing is required for a *valid* backpack; a *complete* one has name, country and summary.
+
+### Tags
+
+Tags are free-form, so one backpack can be compared with others without a fixed taxonomy. The prompt asks for 3 to 8 lowercase, hyphenated English tags, chosen to cover whichever of these facets the website supports:
+
+| Facet | Examples |
+|---|---|
+| Cause or issue area | `food-security`, `clean-water`, `housing`, `arts`, `conservation` |
+| People or communities served | `children`, `refugees`, `veterans`, `farmers`, `animals` |
+| How it works | `direct-service`, `advocacy`, `grantmaking`, `research`, `mutual-aid` |
+| Kind of organization, when distinctive | `foundation`, `faith-based`, `volunteer-run`, `coalition`, `fiscal-sponsor` |
+| Reach | `local`, `regional`, `national`, `international` |
+
+Place names are not tags; the country is in `organization.md`. A backpack built without a website or an LLM key has no tags.
+
+The model's tags then pass through `clean_tags()` in `draft.py`, so the same idea comes out as the same tag in every backpack. Accents are removed and case is lowered (`Niños` → `ninos`). Spaces, underscores, `&` and other punctuation become hyphens (`Legal Aid & Advocacy` → `legal-aid-and-advocacy`). Common synonyms fold to the facet words above (`global` → `international`, `food-insecurity` → `food-security`, `kids` → `children`, `grant-making` → `grantmaking`); `TAG_ALIASES` is the list. Duplicates, bare numbers and phrases of five or more words are dropped. Only the first reach tag is kept. At most 8 tags are kept, in the model's order.
 
 ## Bundle shape
 
 ```
 backpack/
   index.md            # okf_version: "0.2"; lists the concepts
-  log.md              # creation, confirmations, documents added; newest first
-  organization.md     # type: Organization
-  about.md            # type: About: Summary, Mission, Vision sections
-  documents/
-    index.md
-    <slug>.md         # type: Document, one per file or link
-files/
-  <original files>    # sidecar, outside the OKF tree, when documents travel with the zip
+  log.md              # creation and confirmations; newest first
+  organization.md     # type: Organization: name and registration
+  about.md            # type: About: one-sentence Summary, and tags
 ```
 
 An annotated `organization.md` (complete bundles in [examples/](examples/)):
@@ -168,19 +171,14 @@ An annotated `organization.md` (complete bundles in [examples/](examples/)):
 id: 0f3d2a1b-9c8e-4d7f-8a6b-5c4d3e2f1a0b   # UUID v4, minted once and kept across runs  (required)
 type: Organization                         #                                           (required)
 title: Riverbend Food Pantry               # organization name                         (required)
-legal_name: Riverbend Food Pantry Inc      #                                           (required)
 access: public                             # who may read this file: public | private  (required)
 generated:                                 # who produced the current content          (required)
   by: human:7f1e6c0a-…                     # always the creator who ran the tool
   at: '2026-10-21T12:00:00Z'
-  tool: nonprofit-backpack/0.1.0+openrouter:anthropic/claude-sonnet-4.5   # present when any value was fetched or drafted
-registration: { country: US, scheme: IRS-EIN, id: 12-3456789 }   # optional from here on
-year_founded: 2009
-annual_budget: 412350                      # total annual expenses, a number
-staff_count: 6
-website: https://riverbendpantry.example.org
+  tool: nonprofit-backpack/0.2.0          # present when any value was fetched or drafted
+registration: { country: US, id: 12-3456789 }   # optional from here on
 sources:                                   # one entry per fetched source, with a stable id
-  - { id: propublica, resource: https://projects.propublica.org/nonprofits/organizations/123456789, title: IRS Form 990 data … }
+  - { id: propublica, resource: https://projects.propublica.org/nonprofits/organizations/123456789, title: IRS record … }
   - { id: website, resource: https://riverbendpantry.example.org, title: Organization website }
 verified:                                  # confirmations, see below
   - { by: human:7f1e6c0a-…, at: '2026-10-21T12:00:00Z', sha256: 887eb4e4… }
@@ -188,16 +186,38 @@ verified:                                  # confirmations, see below
 
 # Provenance
 
-- `legal_name`: legal name on the IRS record[^propublica]
-- `year_founded`: IRS ruling year, when tax-exempt status was granted, which is not always the founding year[^propublica]
-- `annual_budget`: total expenses in USD from the Form 990 for the fiscal year ending 2025-06[^propublica]
+- `country`[^propublica]
+- `registration_id`: the EIN[^propublica]
+- typed by the organization: `name`
 
-[^propublica]: IRS Form 990 data for EIN 12-3456789 via ProPublica Nonprofit Explorer
+[^propublica]: IRS record for EIN 12-3456789 via ProPublica Nonprofit Explorer
 ```
 
-`about.md` holds `# Summary`, `# Mission` and `# Vision` (only the ones present), points at `./organization.md`, and carries the same `sources`. A drafted summary footnotes each sentence to the source it came from. The `[^website]: …` lines at the end of a body are standard markdown footnote definitions so renderers show the footnotes; the real join key is `sources[].id` in the frontmatter, per OKF §5.1. It is a separate file so a verifier can vouch for the registration and financial facts without endorsing the narrative.
+And `about.md`, from the same example:
 
-`documents/<slug>.md` has `title`, `kind`, optional `period`, `resource` (a path into `files/` or a URL), `sha256` of the bytes, and `access`. Documents are never parsed.
+```yaml
+---
+type: About
+title: About Riverbend Food Pantry
+organization: ./organization.md            # always this path                          (required)
+access: public
+generated:
+  by: human:7f1e6c0a-…
+  at: '2026-10-21T12:00:00Z'
+  tool: nonprofit-backpack/0.2.0+openrouter:anthropic/claude-sonnet-4.5   # the model, since it wrote the tags
+tags: [food-security, families, direct-service, volunteer-run, local]  # LLM only, after clean_tags(); absent if not drafted
+sources:
+  - { id: website, resource: https://riverbendpantry.example.org, title: Organization website }
+---
+
+# Summary
+
+Riverbend Food Pantry distributes groceries to households in Riverbend County, Ohio, through a weekly client-choice pantry and a mobile delivery route.[^website]
+
+[^website]: Organization website
+```
+
+The summary is one sentence, typed or drafted. A drafted summary is footnoted to the source it came from. The `[^website]: …` lines at the end of a body are standard markdown footnote definitions so renderers show the footnotes; the real join key is `sources[].id` in the frontmatter, per OKF §5.1. It is a separate file so a verifier can vouch for the registration facts without endorsing the description.
 
 ## Provenance, identity and confirmation
 
@@ -219,7 +239,7 @@ verified:                                  # confirmations, see below
 
 ## `access`: intent, enforced by storage
 
-Every file carries `access: public | private`, chosen by the organization at creation. **OKF has no access control**: the label records intent, and whatever stores or serves the backpack enforces it. For documents, that is the `Storage` adapter. `index.md` and `log.md` are reserved by OKF and carry no frontmatter.
+Every file carries `access: public | private`, chosen by the organization at creation. **OKF has no access control**: the label records intent, and whatever stores or serves the backpack enforces it. `index.md` and `log.md` are reserved by OKF and carry no frontmatter.
 
 ## Configuration
 
@@ -236,7 +256,7 @@ Sites behind aggressive bot protection may refuse a headless browser; the funnel
 
 ## Non-goals
 
-Out of scope: hosting or storing backpacks, enforcing access, accounts, signatures, and parsing documents.
+Out of scope: hosting or storing backpacks, enforcing access, accounts, signatures, and documents.
 
 ## License
 
